@@ -1,6 +1,150 @@
 <main>
-  <header><p class="eyebrow">BIG DATA · PROYECTO DE AULA</p><h1>Observatorio de actividad sísmica</h1><p>Mapa base, fronteras y eventos en capas independientes.</p></header>
-  <section class="info" aria-live="polite"><strong>{{ mode() }}</strong><p>{{ status() }}</p><p>{{ countriesStatus() }} · {{ count() }} eventos dibujados · {{ omitted() }} omitidos por coordenadas inválidas</p><small>Última lectura UTC: {{ lastRead() }}<br>Generación de la respuesta UTC: {{ generated() }}</small></section>
+  <header>
+    <p class="eyebrow">BIG DATA · PROYECTO DE AULA</p>
+    <h1>Observatorio de actividad sísmica</h1>
+    <p>Mapa base, fronteras y eventos en capas independientes.</p>
+  </header>
+  <section class="info" aria-live="polite">
+    <strong>{{ mode() }}</strong>
+    <p>{{ status() }}</p>
+    <p>{{ countriesStatus() }} · {{ count() }} eventos dibujados · {{ omitted() }} omitidos por coordenadas inválidas</p>
+    <small>Última lectura UTC: {{ lastRead() }}<br>Generación de la respuesta UTC: {{ generated() }}<br>Última ingesta USGS UTC: {{ ingestion() }}</small>
+    @if (reproduction()) { <p>REPRODUCCIÓN. Estos eventos no entran en el análisis en vivo. Se conserva la fecha original del sismo.</p> }
+    @if (truncated()) {
+      <p>El mapa y la tabla muestran un recorte de {{ count() }} sobre {{ resultCount() }}. Las estadísticas no salen de ese recorte: la API las calcula sobre la consulta completa.</p>
+    }
+  </section>
+
+  <form class="filters" (submit)="applyFilters($event)">
+    <label>Desde UTC <input type="datetime-local" [value]="filterStart()" (input)="filterStart.set(inputValue($event))"></label>
+    <label>Hasta UTC, excluido <input type="datetime-local" [value]="filterEnd()" (input)="filterEnd.set(inputValue($event))"></label>
+    <label>Magnitud mínima <input type="number" step="0.1" [value]="filterMag()" (input)="filterMag.set(inputValue($event))"></label>
+    <label>Región
+      <select [value]="filterRegion()" (change)="filterRegion.set(inputValue($event))">
+        <option value="">Todas</option>
+        @for (region of regions(); track region) { <option [value]="region">{{ region }}</option> }
+      </select>
+    </label>
+    <label>País
+      <select [value]="filterCountry()" (change)="filterCountry.set(inputValue($event))">
+        <option value="">Todos</option>
+        <option value="sin-pais">Sin país asignado</option>
+        @for (country of countries(); track country.country_id) { <option [value]="country.country_id">{{ country.name_es }}</option> }
+      </select>
+    </label>
+    <button type="submit">Aplicar</button>
+    <button type="button" (click)="toggleReproduction()">{{ reproduction() ? 'Volver al directo' : 'Ver reproducción' }}</button>
+  </form>
+  <p class="note">Las fechas del filtro se leen como UTC. El filtro de fechas cambia el mapa, la tabla, las ventanas y las distribuciones. No cambia los dos periodos de la comparación.</p>
+
   <div class="map" leaflet [leafletOptions]="options" (leafletMapReady)="onMapReady($event)" aria-label="Mapa interactivo de terremotos"></div>
-  <footer><strong>Profundidad</strong><span>🟡 Menos de 70 km</span><span>🟠 70–299,99 km</span><span>🟣 300 km o más</span><span>⚪ No disponible</span><p>Tamaño: escala visual creciente con la magnitud; no representa energía ni área afectada. Sin magnitud: radio mínimo. El mapa base puede desactivarse en el selector de capas.</p><p>Base proporcionada: añade filtros, gráficos, tabla accesible y conclusiones para completar el proyecto.</p></footer>
+
+  @if (stats(); as data) {
+    <section class="analysis">
+      <h2>Periodo consultado</h2>
+      <p>{{ data.periodo.start }} — {{ data.periodo.end }}, excluido el final. {{ data.total }} eventos. Sin magnitud: {{ data.sin_valor.magnitud }}. Sin profundidad: {{ data.sin_valor.profundidad }}. Sin país: {{ data.sin_valor.pais }}.</p>
+
+      <h2>Ventanas horarias UTC</h2>
+      @if (windowBars().length === 0) {
+        <p>No hay eventos en este periodo.</p>
+      } @else {
+        @if ((data.ventanas.length) > 72) {
+          <p>El gráfico agrupa por día porque hay más de 72 horas. Cada ventana de la consulta sigue siendo una hora UTC, con el final excluido.</p>
+        }
+        <div class="bars" role="img" aria-label="Conteo por ventana">
+          @for (bar of windowBars(); track bar.label) {
+            <div class="bar-row"><span>{{ bar.label }}</span><span class="bar" [style.width.%]="barWidth(bar.total, windowBars())"></span><span>{{ bar.total }}</span></div>
+          }
+        </div>
+      }
+
+      <h2>Conteo por país</h2>
+      @if (countryBars().length === 0) {
+        <p>No hay eventos en este periodo.</p>
+      } @else {
+        <div class="bars" role="img" aria-label="Conteo por país">
+          @for (bar of countryBars(); track bar.nombre) {
+            <div class="bar-row"><span>{{ bar.nombre }}</span><span class="bar" [style.width.%]="barWidth(bar.total, countryBars())"></span><span>{{ bar.total }}</span></div>
+          }
+        </div>
+      }
+
+      <h2>Distribución de magnitud</h2>
+      <p>Media {{ data.magnitud.media ?? 'ND' }}. Denominador: {{ data.magnitud.denominador }} eventos con magnitud. Nulos fuera de la media: {{ data.magnitud.nulos }}.</p>
+      <div class="bars" role="img" aria-label="Distribución de magnitud">
+        @for (bar of data.magnitud.tramos; track bar.etiqueta) {
+          <div class="bar-row"><span>{{ bar.etiqueta }}</span><span class="bar" [style.width.%]="barWidth(bar.total, data.magnitud.tramos)"></span><span>{{ bar.total }}</span></div>
+        }
+      </div>
+
+      <h2>Distribución de profundidad</h2>
+      <p>Media {{ data.profundidad.media ?? 'ND' }} km. Denominador: {{ data.profundidad.denominador }} eventos con profundidad. Nulos fuera de la media: {{ data.profundidad.nulos }}.</p>
+      <div class="bars" role="img" aria-label="Distribución de profundidad">
+        @for (bar of data.profundidad.tramos; track bar.etiqueta) {
+          <div class="bar-row"><span>{{ bar.etiqueta }}</span><span class="bar" [style.width.%]="barWidth(bar.total, data.profundidad.tramos)"></span><span>{{ bar.total }}</span></div>
+        }
+      </div>
+
+      <h2>Comparación histórica</h2>
+      @if (data.comparacion) {
+      <p>{{ data.comparacion.reciente.etiqueta }}: {{ data.comparacion.reciente.inicio }} — {{ data.comparacion.reciente.fin }}. {{ data.comparacion.reciente.total }} eventos.</p>
+      <p>Media diaria de {{ data.comparacion.historico.anio }}: {{ data.comparacion.historico.media_diaria }} eventos por día. Total {{ data.comparacion.historico.total }} / {{ data.comparacion.historico.dias }} días, incluidos los días en cero.</p>
+      <p>Ámbito: {{ scopeLabel() }}. Corte de magnitud: ≥ {{ data.comparacion.corte_magnitud }}.</p>
+      @if (data.comparacion.corte_forzado_a_4) {
+        <p>El filtro de magnitud del mapa está vacío o por debajo de 4. La comparación se mantiene en 4 o más para no mezclar el feed reciente con un histórico ya recortado.</p>
+      }
+      <p>Variación del periodo reciente respecto a la media diaria: {{ variation() }}.</p>
+      <p>{{ data.comparacion.aviso }}</p>
+      } @else {
+        <p>Esta vista no calcula la comparación de las últimas 24 horas: los eventos reproducidos quedan fuera del análisis en vivo.</p>
+      }
+    </section>
+  }
+
+  <section>
+    <h2>Tabla de eventos</h2>
+    @if (tableRows().length === 0) {
+      <p>No hay eventos en este periodo.</p>
+    } @else {
+      <div class="table-wrap">
+        <table>
+          <caption>Eventos del periodo y los filtros aplicados. La magnitud nula aparece como ND y el país desconocido como Sin país asignado.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Fecha UTC</th>
+              <th scope="col">Magnitud</th>
+              <th scope="col">Profundidad (km)</th>
+              <th scope="col">País</th>
+              <th scope="col">Lugar</th>
+              <th scope="col">Identificador</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of tableRows(); track row.id) {
+              <tr>
+                <td>{{ row.time }}</td>
+                <td>{{ row.mag }}</td>
+                <td>{{ row.depth }}</td>
+                <td>{{ row.country }}</td>
+                <td>{{ row.place }}</td>
+                <td>{{ row.id }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (truncated() || offset() > 0) {
+        <p>
+          <button type="button" (click)="changePage(-5000)" [disabled]="offset() === 0">Anteriores</button>
+          <button type="button" (click)="changePage(5000)" [disabled]="!truncated()">Siguientes</button>
+        </p>
+      }
+    }
+  </section>
+
+  <footer>
+    <strong>Profundidad</strong>
+    <span>🟡 Menos de 70 km</span><span>🟠 70–299,99 km</span><span>🟣 300 km o más</span><span>⚪ No disponible</span>
+    <p>Tamaño: escala visual creciente con la magnitud; no representa energía ni área afectada. Sin magnitud: radio mínimo. El mapa base puede desactivarse en el selector de capas.</p>
+  </footer>
 </main>

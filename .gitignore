@@ -1,0 +1,8 @@
+datos/raw/
+.env
+
+# Local Netlify folder
+.netlify
+
+
+docs/

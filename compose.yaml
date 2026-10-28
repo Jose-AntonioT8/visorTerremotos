@@ -1,0 +1,92 @@
+# Kafka en KRaft, un solo broker.
+# Retención limitada: 24 horas o 1 GiB, lo que se alcance antes.
+# El listener que anuncian los contenedores es kafka:9092.
+# No se publica el puerto en el host: desde fuera de Compose no hay que usar localhost.
+# El broker no se expone por ngrok.
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  productor:
+    build: ./pipeline
+    command: ["python", "productor.py"]
+    env_file: .env
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./pipeline/sql/001_esquema.sql:/docker-entrypoint-initdb.d/001_esquema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  consumidor:
+    build: ./pipeline
+    command: ["python", "consumidor.py"]
+    env_file: .env
+    environment:
+      PAUSA_ANTES_COMMIT: ${PAUSA_ANTES_COMMIT:-0}
+      PAISES_GEOJSON: /datos/paises.geojson
+    volumes:
+      - ./frontend/public/datos/paises.geojson:/datos/paises.geojson:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  api:
+    build: ./pipeline
+    command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: .env
+    environment:
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,https://visorterremotos.netlify.app}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+volumes:
+  kafka_data:
+  postgres_data:
