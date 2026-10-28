@@ -120,7 +120,8 @@ Después lista cada comprobación como `pasa`, `falla` o `sin evidencia`, con la
 - `apiUrl` es la URL HTTPS real asignada. El authtoken no aparece en el repo, en la imagen ni en `config.json`.
 - CORS incluye el origen exacto de Netlify.
 - El panel distingue túnel caído de datos simplemente antiguos.
-- Evidencia de apertura desde fuera de localhost y del aviso al cerrar el túnel. Sin ella, incompleta.
+- Con la misma URL, al reabrir el túnel el refresco siguiente recupera los datos. Si el dominio gratuito cambia, `docs/despliegue.md` explica que hay que volver a publicar `config.json`; eso no suspende la prueba cuando la URL estable sí se recuperó.
+- Evidencia de apertura desde fuera de localhost, del aviso al cerrar el túnel y de la recuperación con la URL estable. Sin ella, incompleta.
 
 ## 11 — Reproducción e informe
 

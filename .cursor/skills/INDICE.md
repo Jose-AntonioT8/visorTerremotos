@@ -1,6 +1,6 @@
 # Skills del observatorio sísmico
 
-Cada skill se aplica solo cuando se invoca por su nombre. No arranca sola ni pasa al paso siguiente. El agente `.cursor/agents/observatorio-orquestador.md` ejecuta una parte y, al cerrar la iteración, invoca `observatorio-revisar-iteracion`. Solo entonces pasa a la siguiente.
+Cada skill de paso se aplica solo cuando se invoca por su nombre. El agente `.cursor/agents/observatorio-orquestador.md` ejecuta la parte y, al cerrarla, invoca una sola vez `observatorio-revisar-iteracion`. Las skills de paso no lanzan esa revisión.
 
 | Skill | Qué cierra |
 |---|---|

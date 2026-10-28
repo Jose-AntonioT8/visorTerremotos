@@ -41,13 +41,15 @@ Sin un recorte, empieza por la primera parte de la 01 a la 11 cuyo `docs/verific
 
 ## Bucle
 
+Una iteración tiene una sola revisión: la del punto 2. Las skills de paso no invocan `observatorio-revisar-iteracion`. A partir de la parte 05 no vuelvas a verificar las partes 03 y 04.
+
 Para cada parte N:
 
-1. Invoca la skill de esa fila y lee su `SKILL.md`. Ejecuta su «Hecho cuando». No empieces N+1.
-2. Deja de editar. Invoca `/observatorio-revisar-iteracion` y lee su `SKILL.md`. Esa skill, a su vez, invoca `/observatorio-verificar-parte` y lee `.cursor/skills/observatorio-verificar-parte/SKILL.md` para la parte N. Sin esas dos lecturas la iteración no ha terminado.
+1. Invoca la skill de esa fila y lee su `SKILL.md`. Ejecuta su «Hecho cuando». En la parte 01 arranca el frontend, pide al usuario la comprobación visual y espera su confirmación. No empieces N+1.
+2. Deja de editar. Invoca una vez `/observatorio-revisar-iteracion` y lee su `SKILL.md`. Esa revisión lee `.cursor/skills/observatorio-verificar-parte/SKILL.md` para la parte N. Sin esas dos lecturas la iteración no ha terminado.
 3. Guarda el informe en `docs/verificacion/paso-NN.md`.
 4. Si la primera línea es `resultado: correcta`, pasa a la parte siguiente.
-5. Si es `incorrecta` o `incompleta`, corrige solo lo marcado y vuelve al punto 2. Máximo tres revisiones por parte.
+5. Si es `incorrecta` o `incompleta`, corrige solo lo marcado y vuelve al punto 2. Máximo tres revisiones por parte, contadas solo aquí.
 6. Si la tercera no es `correcta`, detén el recorrido. No saltes la parte.
 
 Cuando la 11 quede en `resultado: correcta`, invoca `/observatorio-revisar-rubrica` y lee su `SKILL.md` sin modificar código.

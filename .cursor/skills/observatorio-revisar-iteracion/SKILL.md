@@ -2,9 +2,9 @@
 name: observatorio-revisar-iteracion
 description: >-
   Revisa lo hecho en la iteración recién terminada de un paso del observatorio
-  sísmico y devuelve correcta, incorrecta o incompleta. Usar al cerrar cada
-  iteración del orquestador o de una skill de paso, antes de dar el paso por
-  terminado o de empezar el siguiente.
+  sísmico y devuelve correcta, incorrecta o incompleta. Usar cuando el
+  orquestador cierra una iteración, antes de dar el paso por terminado o de
+  empezar el siguiente. Las skills de paso no la invocan.
 disable-model-invocation: true
 ---
 

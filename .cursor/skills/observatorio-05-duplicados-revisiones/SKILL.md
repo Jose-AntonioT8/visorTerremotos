@@ -62,7 +62,7 @@ Parte de tablas de eventos vacías (no borres el catálogo de países si ya exis
 
 En la implementación, `updated` es timestamp completo. Resultado final: E1 magnitud 4,6 y E2 magnitud 3,1. Guarda la salida SQL en `docs/prueba-revisiones.md`. Reinicia el consumidor antes de confirmar un offset y comprueba que el reenvío no duplica la fila.
 
-Estos identificadores son de prueba. No los presentes como sismos reales ni los dejes en el análisis de USGS.
+Estos identificadores son de prueba. No los presentes como sismos reales ni los dejes en el análisis de USGS. Desde este paso no se vuelven a verificar los pasos 03 y 04: el mensaje ficticio y la fila de prueba pueden desaparecer.
 
 ## Hecho cuando
 

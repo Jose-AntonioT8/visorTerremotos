@@ -49,7 +49,7 @@ Para cada fila: cumplida, incumplida o sin evidencia. Cita archivo, consulta o s
 | Evento marítimo | Sin país; sigue en el análisis |
 | Reinicio del consumidor | Reanuda sin duplicar lo ya persistido |
 | Túnel cerrado | El panel avisa y no disfraza la última lectura de lectura nueva |
-| Túnel reabierto | Las consultas se recuperan |
+| Túnel reabierto | Con la misma URL, el refresco siguiente recupera las consultas. Un dominio nuevo de ngrok no suspende la prueba si el despliegue lo explica y la URL estable sí se recuperó |
 | Reproducción | Pasa por Kafka, aislada, etiquetada «REPRODUCCIÓN», con las fechas originales |
 
 Comprueba también el cierre operativo: los cinco servicios en un solo `compose.yaml` con salud y reintentos; volúmenes; `.env.example` sin secretos; API en `0.0.0.0:8000`; CORS del origen real; `config.json` en modo `api` con HTTPS de ngrok cuando se hable de producción; filtros coherentes entre mapa, tabla y estadísticas; truncado señalado.
