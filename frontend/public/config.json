@@ -1,6 +1,6 @@
 {
   "mode": "api",
-  "apiUrl": "https://whoops-botanical-humorist.ngrok-free.dev",
+  "apiUrl": "https://visorterremotos.netlify.app",
   "refreshMs": 60000,
   "skipNgrokWarning": true
 }

@@ -18,12 +18,8 @@ En otra terminal:
 ngrok http 8000
 ```
 
-Copia la URL HTTPS completa que muestra ngrok (acaba en `.dev`) y úsala como `apiUrl` en `frontend/public/config.json`, sin barra final: el frontend añade `/api/eventos`.
+La web no llama a ngrok desde el navegador. `frontend/public/config.json` apunta a `https://visorterremotos.netlify.app` y Netlify reenvía `/api/*` al túnel. La URL del túnel está en `frontend/netlify/edge-functions/proxy-api.js`.
 
 ## 3. Ver los terremotos en Netlify
 
-https://visorterremotos.netlify.app no lee el archivo de tu PC. El navegador usa el `config.json` del último despliegue.
-
-Si el dominio de ngrok no ha cambiado, no hace falta volver a publicar. Con Docker y ngrok en marcha, recarga la web: pide `https://TU-DOMINIO-NGROK/api/eventos` y ngrok lo reenvía a la API local.
-
-Si ngrok te asigna otro dominio, guarda la URL nueva en `frontend/public/config.json`, súbela al repositorio y espera a que Netlify termine el build. Luego recarga la página.
+Docker y ngrok tienen que seguir en marcha. Publica el frontend para que Netlify coja `config.json` y la función de reenvío. Si ngrok cambia de dominio, actualiza `TUNEL` en esa función y vuelve a publicar.
