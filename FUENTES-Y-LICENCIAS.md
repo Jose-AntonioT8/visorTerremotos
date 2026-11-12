@@ -12,6 +12,7 @@
 - El repositorio fuente puede cambiar: usa la copia entregada para reproducibilidad.
 - `ADM0_A3` identifica la entidad Natural Earth; no asumir que todos los códigos son ISO oficiales. `NAME_ES`, `ADMIN`, `CONTINENT` y `SUBREGION` contienen atributos útiles.
 - Fronteras simplificadas y convenciones cartográficas del proveedor; no sirve para delimitar jurisdicción legal ni para asignar con precisión eventos costeros. No incluye todos los pequeños territorios. El mar no es un país.
+- `frontend/public/datos/paises-costa.geojson` sale de esa copia, que no se edita. El contorno crece 25 km hacia el mar y se corta al llegar a otro país, así la frontera terrestre sigue igual. El mapa dibuja ese contorno y el consumidor aplica el mismo margen al asignar el país.
 
 ## Visualización
 

@@ -82,7 +82,7 @@ export class AppComponent implements OnDestroy {
     L.control.layers({ 'OpenStreetMap': base }, { 'Países (Natural Earth)': borders, 'Terremotos': this.events }).addTo(map);
     map.attributionControl.addAttribution('Fronteras: Natural Earth · Datos reales: USGS');
     try {
-      borders.addData(await this.readJson<FeatureCollection>('datos/paises.geojson'));
+      borders.addData(await this.readJson<FeatureCollection>('datos/paises-costa.geojson'));
       this.countriesStatus.set('Catálogo de países cargado');
     } catch { this.countriesStatus.set('No se pudo cargar el catálogo de países'); }
     if (this.destroyed) return;
