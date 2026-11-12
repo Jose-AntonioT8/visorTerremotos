@@ -148,14 +148,10 @@ Criterio: pruebas del túnel.
 Pantalla: terminal. Los datos de esta orden son sintéticos y no entran en el mapa.
 
 ```text
-docker compose run --rm --no-deps -e PAISES_GEOJSON=/datos/paises.geojson consumidor python mediciones.py
+docker compose run --rm --no-deps --entrypoint python -v "${PWD}/pipeline:/work" -e PYTHONPATH=/work consumidor /work/mediciones.py
 ```
 
-Esa imagen no copia `mediciones.py`. Si el contenedor no lo encuentra, lanza la misma orden montando el código:
-
-```text
-docker compose run --rm --no-deps --entrypoint python -v "${PWD}/pipeline:/work" -e PYTHONPATH=/work -e PAISES_GEOJSON=/datos/paises.geojson consumidor /work/mediciones.py
-```
+La imagen no lleva `mediciones.py`; por eso se monta la carpeta `pipeline`.
 
 Enseña las tres tallas de la búsqueda (lista frente a diccionario), el punto en polígono y la agregación por hora con y sin índice. Di que son tiempos de esta máquina, no una previsión. Cierra con una frase de coste con el supuesto a la vista: electricidad, almacenamiento o tiempo de desarrollo, y que una cuota gratuita no es coste cero. Si no tienes esa frase escrita, dilo en este plano; no hay otro documento en el repo que la respalde.
 
