@@ -12,7 +12,11 @@
 - El repositorio fuente puede cambiar: usa la copia entregada para reproducibilidad.
 - `ADM0_A3` identifica la entidad Natural Earth; no asumir que todos los códigos son ISO oficiales. `NAME_ES`, `ADMIN`, `CONTINENT` y `SUBREGION` contienen atributos útiles.
 - Fronteras simplificadas y convenciones cartográficas del proveedor; no sirve para delimitar jurisdicción legal ni para asignar con precisión eventos costeros. No incluye todos los pequeños territorios. El mar no es un país.
-- `frontend/public/datos/paises-costa.geojson` sale de esa copia, que no se edita. El contorno crece 25 km hacia el mar y se corta al llegar a otro país, así la frontera terrestre sigue igual. El mapa dibuja ese contorno y el consumidor aplica el mismo margen al asignar el país.
+- `frontend/public/datos/paises-costa.geojson` sale de esa copia, que no se edita. El contorno crece 25 km hacia el mar y se corta al llegar a otro país, así la frontera terrestre sigue igual. El consumidor aplica el mismo margen al asignar el país.
+- `frontend/public/datos/paises-10m.geojson` es el contorno que dibuja el mapa. La frontera terrestre sigue Natural Earth a 1:10.000.000, alineada con OpenStreetMap. En la costa el trazo sale 25 km hacia el mar, el mismo margen del consumidor, y se corta al llegar al margen de otro país. Solo conserva `NAME_ES` y `ADMIN`. No sustituye a `paises.geojson` en la asignación del país.
+- Descargado: 15 de noviembre de 2026.
+- Fuente: https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson
+- Licencia de los datos: dominio público, la misma del proyecto Natural Earth.
 
 ## Visualización
 

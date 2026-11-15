@@ -71,7 +71,7 @@ export class AppComponent implements OnDestroy {
     const base = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, noWrap: true, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
-    const borders = L.geoJSON(undefined, { style: { color: '#334155', weight: 1, fill: false },
+    const borders = L.geoJSON(undefined, { style: { color: '#334155', weight: 1.25, opacity: 0.95, fill: false, smoothFactor: 0.2 } as L.PathOptions,
       onEachFeature: (feature, layer) => {
         const name = document.createElement('span');
         name.textContent = feature.properties?.NAME_ES ?? feature.properties?.ADMIN ?? 'Sin nombre';
@@ -80,9 +80,9 @@ export class AppComponent implements OnDestroy {
     }).addTo(map);
     this.events.addTo(map);
     L.control.layers({ 'OpenStreetMap': base }, { 'Países (Natural Earth)': borders, 'Terremotos': this.events }).addTo(map);
-    map.attributionControl.addAttribution('Fronteras: Natural Earth · Datos reales: USGS');
+    map.attributionControl.addAttribution('Fronteras: Natural Earth 1:10m, margen de costa 25 km · Datos reales: USGS');
     try {
-      borders.addData(await this.readJson<FeatureCollection>('datos/paises-costa.geojson'));
+      borders.addData(await this.readJson<FeatureCollection>('datos/paises-10m.geojson'));
       this.countriesStatus.set('Catálogo de países cargado');
     } catch { this.countriesStatus.set('No se pudo cargar el catálogo de países'); }
     if (this.destroyed) return;

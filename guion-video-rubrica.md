@@ -1,67 +1,91 @@
-# Guion del vídeo de evidencias
+# Guion del vídeo de evidencias (aprobado)
 
-Un solo recorrido, en este orden. El panel es una sola página: no cambies de ruta, baja con el scroll. El resto son pestañas del navegador, la terminal y dos documentos.
+Un solo recorrido, en este orden. Cubre los **cinco criterios** de la rúbrica (§13) y las **pruebas de aceptación** (§11). El panel es una sola página: no cambies de ruta, baja con el scroll. El resto son pestañas del navegador, la terminal y documentos.
 
-Antes de darle a grabar: `docker compose ps` con los cinco servicios en marcha (kafka, postgres, productor, consumidor, api), ngrok activo y el panel abierto en `https://visorterremotos.netlify.app`. No enseñes `.env`, contraseñas ni `node_modules`. No digas que los gráficos predicen terremotos o miden riesgo.
+Antes de grabar: `docker compose ps` con los cinco servicios en marcha (kafka, postgres, productor, consumidor, api), ngrok activo y el panel abierto en `https://visorterremotos.netlify.app`. No enseñes `.env`, contraseñas ni `node_modules`. No digas que los gráficos predicen terremotos o miden riesgo.
 
-`informeCalidad.md` no sirve como prueba: es una nota de una línea. El apartado de calidad que se enseña es `documentacionCalidad/README.md`. No hay un `docs/conclusiones.md`: las tres conclusiones se leen de los números que haya ese día en el panel, no de una cifra escrita de antemano.
+Documentos a tener abiertos (o listos en pestaña):
+
+| Documento | Para qué |
+|---|---|
+| `informeCalidad.md` | Calidad: consultas, denominadores, decisiones (fecha 15 nov 2026) |
+| `docs/memoria.md` | Diccionario, modelo, conclusiones, complejidad, costes, tabla de pruebas |
+| `docs/prueba-revisiones.md` | Evidencia escrita de reenvío / reinicio del consumidor |
+| `docs/prueba-reproduccion.md` | Evidencia escrita del replay (si no quieres relanzarlo en vídeo) |
+| `docs/historico.md` | Cómo se descargó y regenera el histórico 2025 |
+| `FUENTES-Y-LICENCIAS.md` | Tres fuentes y licencias |
+
+## Mapa rúbrica ↔ tomas
+
+| Criterio | Nivel mínimo aprobado (5–6) | Qué enseña este guion | Tomas |
+|---|---|---|---|
+| Extracción | Carga básica | Feed + histórico + catálogo; tipos/unidades; automatización Compose | 1–3 |
+| Calidad | Análisis parcial | ≥4 dimensiones en `informeCalidad.md` + nulos en panel + cuarentena | 4–5, 8 |
+| Modelado | Join básico | País por polígono, grano/claves, revisiones, idempotencia | 6–7, 7b |
+| Análisis | 1–2 análisis | Ventanas, países, distribuciones, filtros, comparación, 3 conclusiones | 9–11 |
+| Reflexión | Reflexión básica | Mediciones, coste, limitaciones, una mejora | 14–15 |
+
+Las tomas 7b, 12 y 13 cierran las pruebas §11 que no entran solas en un criterio.
+
+---
 
 ## 1. Los cinco servicios
 
-Pantalla: terminal, en la raíz del repo.
+Pantalla: terminal, raíz del repo.
 
 ```text
 docker compose ps
 ```
 
-Que se vean los cinco nombres y que postgres y kafka estén healthy. Frase: el sistema entra con un solo Compose; la API escucha en el puerto 8000 del host y el navegador no llama a Kafka.
+Que se vean los cinco nombres y que postgres y kafka estén healthy. Frase: el sistema entra con un solo `docker compose up --build -d`; la API escucha en el puerto 8000 del host; Kafka y PostgreSQL no salen por el túnel.
 
-Criterio: cierre operativo de la rúbrica.
+Criterio: cierre operativo / entregable Compose.
 
-## 2. De dónde salen los datos
+## 2. De dónde salen los datos (extracción)
 
-Pantalla: `FUENTES-Y-LICENCIAS.md`, y luego el log del productor.
+Pantalla: `FUENTES-Y-LICENCIAS.md` (tres fuentes), luego `docs/historico.md` (un mes de ejemplo), luego log del productor.
 
 ```text
 docker compose logs productor --tail 30
 ```
 
-Que se vea una consulta al feed de USGS (`all_day.geojson`) o al histórico FDSN, no un fichero inventado. Frase: hay tres fuentes. El feed se consulta solo cada unos 60 segundos, el histórico de 2025 ya está cargado y el país sale del catálogo Natural Earth, no del texto `place`.
+Que se vea una consulta al feed (`all_day.geojson`), no un fichero inventado. Frase: el feed se consulta solo cada unos 60 segundos; el histórico 2025 (magnitud ≥4, tipo earthquake) se descargó una vez mes a mes y está en `datos/raw/` fuera de Git; el país sale de Natural Earth (`paises.geojson`), no del texto `place`. Si enseñas regeneración: el procedimiento está en `docs/historico.md` / `pipeline/historico.py`.
 
-Criterio: extracción.
+Criterio: **extracción** (histórico, feed, catálogo, automatización).
 
 ## 3. Un evento, con sus tipos
 
-Pantalla: `https://visorterremotos.netlify.app/api/eventos`.
+Pantalla: URL pública de la API, p. ej. la raíz ngrok + `/api/eventos` (o el panel → Network / JSON).
 
 Abre el JSON. Señala un `Feature`: `coordinates` en orden longitud, latitud, profundidad en km; `mag` numérico o `null`; `time` y `updated` en milisegundos UTC; `country_id` o `null`. En `metadata`, `generated` y `last_ingestion` no son la misma cifra. Frase: la API no rellena un nulo con cero ni cambia el orden de las coordenadas.
 
-Criterio: extracción (tipos, unidades y límites) y contrato de la API.
+Criterio: **extracción** (tipos, unidades y límites) y contrato de la API.  
+Prueba §11: evento nuevo visible en API (luego en mapa en la toma 9).
 
 ## 4. Calidad: qué se midió y qué se decidió
 
-Pantalla: `documentacionCalidad/README.md`, de arriba abajo, sin saltarte las tablas.
+Pantalla: `informeCalidad.md`, de arriba abajo. (Si prefieres el resumen compacto: apartado Calidad de `docs/memoria.md`.)
 
-Para en cuatro sitios:
+Para en al menos **cuatro** sitios (aprobado claro / notable):
 
-- Magnitudes nulas. Denominador escrito, resultado y la decisión: se guardan nulas y no entran en la media.
-- Duplicados. `evento_actual` tiene tantos identificadores como filas; las filas de más están en `evento_version`.
-- País ausente. El porcentaje con su denominador, y la frase de que no se copia el país desde `place`.
-- Cuarentena. La tabla de motivos, con la coordenada inválida y las explosiones fuera de `evento_actual`.
+1. **Completitud — magnitudes nulas.** Denominador, resultado y decisión: se guardan nulas; no entran en la media; el mapa pone ND.
+2. **Unicidad — duplicados/revisiones.** `evento_actual`: filas = ids; las de más están en `evento_version`.
+3. **Completitud / exactitud — país ausente.** Porcentaje con denominador; no se copia el país desde `place`; «Sin país asignado».
+4. **Validez — cuarentena.** Motivo + original; coordenada inválida y tipos no earthquake fuera de `evento_actual`.
 
-Di la fecha de esas consultas (28 de octubre de 2026). Si quieres cifras de hoy, ejecuta en otra toma las mismas SQL del documento; no mezcles los dos momentos en la misma frase.
+Menciona en una frase **actualidad** (última ingesta vs `generated`) y **consistencia** de revisiones (vivo vs replay), aunque sea leyendo la tabla de la memoria. Di la fecha de las consultas del documento que enseñes; no mezcles 28 oct y 15 nov en la misma frase.
 
-Criterio: calidad.
+Criterio: **calidad**.
 
 ## 5. El panel no disfraza los nulos
 
-Pantalla: el panel, bloque de arriba y el inicio de «Periodo consultado».
+Pantalla: el panel, bloque de arriba y «Periodo consultado».
 
-Que se lean a la vez: modo `API · datos del backend`, «Última ingesta USGS UTC», «Sin magnitud», «Sin profundidad» y «Sin país». Baja hasta la tabla y enseña una celda `ND` si hay una magnitud nula, o di que en esta ventana no hay ninguna y que el caso de prueba está en `replay`. En el pie, la leyenda del círculo gris: sin profundidad no se pinta como cero.
+Que se lean a la vez: modo `API · datos del backend`, «Última ingesta USGS UTC», «Sin magnitud», «Sin profundidad» y «Sin país». Baja hasta la tabla y enseña una celda `ND` si hay magnitud nula, o di que en esta ventana no hay ninguna y que el caso de prueba (`prueba-mar` / replay) está documentado. En el pie, leyenda del círculo gris: sin profundidad no se pinta como cero.
 
-Criterio: calidad y prueba «magnitud nula».
+Criterio: **calidad**. Prueba §11: magnitud nula.
 
-## 6. País por polígono, no por el texto
+## 6. País por polígono (modelado)
 
 Pantalla: terminal.
 
@@ -71,19 +95,39 @@ docker compose exec postgres psql -U observatorio -d observatorio -c "SELECT eve
 
 `prueba-esp` tiene país y `prueba-mar` no, aunque el texto del lugar diga otra cosa. Después, en el panel, filtro País = «Sin país asignado» y Aplicar. El mapa, la tabla y «Sin país» del periodo tienen que cuadrar. Vuelve a «Todos» antes de seguir.
 
-Criterio: modelado y prueba «evento marítimo».
+Opcional 20 s: en `docs/memoria.md`, apartado Modelo, lee grano y claves: `evento_actual` (una fila por `event_id`), `evento_version` (`event_id` + `updated_ms`), `pais` por `ADM0_A3`, esquema `replay` aparte.
 
-## 7. Una fila vigente y las revisiones aparte
+Criterio: **modelado** (integración geográfica, grano). Prueba §11: evento marítimo.
 
-Pantalla: terminal, y el apartado «Duplicados y revisiones» de `documentacionCalidad/README.md`.
+## 7. Una fila vigente y las revisiones
+
+Pantalla: terminal + apartado «Duplicados y revisiones» de `informeCalidad.md` (o `docs/prueba-reproduccion.md`).
 
 ```text
 docker compose exec postgres psql -U observatorio -d observatorio -c "SELECT (SELECT count(*) FROM evento_actual) AS actuales, (SELECT count(DISTINCT event_id) FROM evento_actual) AS ids, (SELECT count(*) FROM evento_version) AS versiones;"
 ```
 
-`actuales` e `ids` iguales. `versiones` mayor o igual. En el documento, señala la fila de `us6000pjr6`: repetir el mismo `updated` no sumó terremotos, la revisión posterior cambió solo `replay` y la fila viva se quedó en 4,2.
+`actuales` e `ids` iguales. `versiones` mayor o igual. Señala `us6000pjr6`: repetir el mismo `updated` no sumó terremotos; la revisión posterior cambió solo `replay` (4,4); la fila viva se quedó en 4,2.
 
-Criterio: modelado. Pruebas: misma versión reenviada, versión posterior, versión antigua que no pisa la nueva.
+Criterio: **modelado** (revisiones, idempotencia).  
+Pruebas §11: misma versión reenviada; versión posterior; versión antigua que no pisa la nueva.
+
+## 7b. Reiniciar el consumidor (sin duplicar)
+
+Pantalla: `docs/prueba-revisiones.md`, apartado «Reenvío antes de confirmar el offset».
+
+Lee en voz: se guardó, se reinició el consumidor antes del offset, Kafka reentregó, el recuento siguió en `2|3`. Frase: procesamiento al menos una vez con escritura idempotente; no hace falta transacción distribuida Kafka–PostgreSQL.
+
+Si puedes demostrarlo en vivo (opcional, ~1 min):
+
+```text
+docker compose restart consumidor
+docker compose logs consumidor --tail 20
+```
+
+Y repite el `count` de la toma 7: los totales no deben dispararse solo por el reinicio.
+
+Criterio: **modelado**. Prueba §11: reiniciar consumidor.
 
 ## 8. Coordenada imposible, sin punto dibujado
 
@@ -93,85 +137,113 @@ Pantalla: terminal.
 docker compose exec postgres psql -U observatorio -d observatorio -c "SELECT motivo, original->>'id' AS id FROM cuarentena WHERE original->>'id' = 'prueba-malo'; SELECT count(*) AS en_vivo FROM evento_actual WHERE event_id = 'prueba-malo';"
 ```
 
-Motivo de coordenadas y `en_vivo` a cero. Frase: el mensaje se conserva con el original y el offset se confirma después, así no se reintenta para siempre ni se inventa un punto.
+Motivo de coordenadas y `en_vivo` a cero. Frase: se conserva el original con motivo; el offset se confirma después; no se inventa un punto en el mapa.
 
-Criterio: calidad. Prueba: coordenadas inválidas.
+Criterio: **calidad**. Prueba §11: coordenadas inválidas.
 
 ## 9. Mapa, ventanas, países y distribuciones
 
 Pantalla: el panel, desde el mapa hasta el final de «Distribución de profundidad». Una toma continua, bajando despacio.
 
-Enseña, en este orden: el mapa con la leyenda de profundidad, «Ventanas horarias UTC», «Conteo por país» (incluida la barra «Sin país asignado» si sale), la media de magnitud con su denominador y los nulos fuera, y lo mismo en profundidad. Si el gráfico de ventanas dice que agrupa por día, lee esa frase: la consulta sigue siendo por hora UTC.
+En este orden: mapa con leyenda de profundidad (y tamaño por magnitud); «Ventanas horarias UTC»; «Conteo por país» (incluida «Sin país asignado» si sale); media de magnitud con denominador y nulos fuera; lo mismo en profundidad. Si el gráfico agrupa por día, lee esa frase: la consulta sigue siendo por hora UTC. Confirma que los puntos del mapa coinciden con el total del periodo (evento nuevo en mapa + análisis).
 
-Criterio: análisis (tres análisis distintos: ventanas, distribuciones, conteo por país).
+Criterio: **análisis** (ventanas, distribuciones, conteo por país).
 
 ## 10. Los filtros mueven las tres vistas a la vez
 
 Pantalla: el panel. Anota en voz el total de «Periodo consultado» antes de filtrar.
 
-Pon magnitud mínima 5 y un país que tenga eventos. Aplicar. En el mismo plano tienen que cambiar el mapa, el total del periodo, las barras y las filas de la tabla. Lee la nota gris: el filtro de fechas no cambia los dos periodos de la comparación. Quita los filtros con el país en «Todos» y la magnitud vacía, y Aplicar, para dejar la vista limpia.
+Pon magnitud mínima 5 y un país que tenga eventos. Aplicar. En el mismo plano tienen que cambiar el mapa, el total del periodo, las barras y las filas de la tabla. Lee la nota gris: el filtro de fechas no cambia los dos periodos de la comparación. Quita los filtros (país «Todos», magnitud vacía) y Aplicar.
 
-Criterio: análisis y la comprobación de filtros coherentes.
+Criterio: **análisis** (filtros coherentes).
 
 ## 11. Comparación equivalente y tres conclusiones
 
 Pantalla: «Comparación histórica», sin filtro de país y con la magnitud del mapa vacía o por debajo de 4.
 
-Lee lo que haya escrito ahí, sin sustituir cifras: periodo reciente, media diaria del año histórico, días del denominador, corte de magnitud y la variación. Si aparece el aviso de que el corte se mantiene en 4 o más, léelo: el feed reciente y el histórico de 2025 no se mezclan por debajo de ese corte. La frase de días en cero también se lee.
+Lee lo que haya escrito ahí, sin inventar cifras: periodo reciente, media diaria del año histórico, días del denominador (365, **incluidos días con cero**), corte de magnitud y la variación. Si aparece el aviso de que el corte se mantiene en ≥4, léelo. Menciona que el tramo reciente puede estar incompleto por retrasos de USGS.
 
-Di tres conclusiones seguidas, cada una con la cifra que acabas de enseñar, el ámbito (mundial o el país filtrado) y el periodo. Ninguna puede ser «habrá un terremoto» ni «esta zona es peligrosa». Ejemplo de forma, no de contenido: «En estas 24 horas el recuento está un X % por encima de la media diaria de 2025, con el mismo corte de magnitud 4 y los días en cero dentro del denominador».
+Di **tres conclusiones** seguidas, cada una con cifra, ámbito y periodo. Ninguna puede ser predicción ni riesgo. Forma (no copies cifras viejas): «En estas 24 horas el recuento está un X % respecto de la media diaria de 2025, mismo corte de magnitud ≥4 y días en cero en el denominador.»
 
-Criterio: análisis, nivel de conclusiones. Este plano cubre lo que no está redactado en un fichero: si no lo dices con las cifras de la pantalla, la prueba no queda.
+Opcional: si quieres cifras ya redactadas, abre `docs/memoria.md` / `docs/conclusiones.md` y di que son del día de esa consulta, no de hoy.
+
+Criterio: **análisis** (comparación + insights / conclusiones).
 
 ## 12. Reproducción aislada
 
 Pantalla: el panel. Pulsa «Ver reproducción».
 
-Tiene que verse la palabra REPRODUCCIÓN y el texto de que esos eventos no entran en el análisis en vivo. La comparación histórica, en esta vista, dice que no se calcula. La tabla trae fechas originales, no la hora de la grabación. Pulsa «Volver al directo» y comprueba que la comparación vuelve.
+Tiene que verse la palabra **REPRODUCCIÓN** y que esos eventos no entran en el análisis en vivo. La comparación histórica, en esta vista, dice que no se calcula. La tabla trae fechas originales, no la hora de la grabación. Pulsa «Volver al directo» y comprueba que la comparación vuelve.
 
-Si hace falta el origen: `pipeline/reproducir.py` publica en el topic `eventos-replay` y el consumidor escribe en el esquema `replay`, no en `evento_actual`.
+Origen (una frase): `pipeline/reproducir.py` → topic `eventos-replay` → esquema `replay`, mismo consumidor. Evidencia escrita: `docs/prueba-reproduccion.md`.
 
-Criterio: prueba «reproducción histórica».
+Criterio: prueba §11 **reproducción histórica**.
 
 ## 13. Túnel cerrado y túnel otra vez
 
-Pantalla: el panel, con la hora de «Última lectura UTC» visible. Para ngrok en la terminal, sin cerrar el navegador.
+Pantalla: el panel, con «Última lectura UTC» visible. Para ngrok en la terminal, sin cerrar el navegador.
 
-Espera a que el estado deje de decir que la consulta se completó. Tiene que salir un aviso de fallo y la hora de última lectura no puede saltar a «ahora» como si hubiera datos nuevos. Los puntos que ya estaban siguen.
+Espera a que el estado deje de decir que la consulta se completó. Aviso de fallo; la hora de última lectura no salta a «ahora» como si hubiera datos nuevos; los puntos que ya estaban siguen.
 
-Vuelve a arrancar ngrok. Si el dominio es el mismo que `TUNEL` en `frontend/netlify/edge-functions/proxy-api.js`, no toques nada: en menos de un minuto el estado vuelve a «API accesible · consulta completada». Si ngrok te da otro dominio, di en voz que hay que actualizar `TUNEL` y republicar; no lo presentes como un fallo del panel.
+Vuelve a arrancar ngrok. Si el dominio es el mismo que en `frontend/public/config.json` / proxy Netlify, en menos de un minuto el estado vuelve a accesible. Si ngrok da otro dominio, di en voz que hay que actualizar la URL, `npm run build` y republicar Netlify (`docs/despliegue.md`); no lo presentes como fallo del panel.
 
-Criterio: pruebas del túnel.
+Criterio: pruebas §11 del túnel. Reflexión breve: sin equipo/túnel, Netlify sigue sirviendo la UI pero no hay datos nuevos.
 
-## 14. Medición y coste
+## 14. Medición, coste, limitaciones y una mejora
 
-Pantalla: terminal. Los datos de esta orden son sintéticos y no entran en el mapa.
+Pantalla: terminal. Datos sintéticos; no entran en el mapa.
 
 ```text
 docker compose run --rm --no-deps --entrypoint python -v "${PWD}/pipeline:/work" -e PYTHONPATH=/work consumidor /work/mediciones.py
 ```
 
-La imagen no lleva `mediciones.py`; por eso se monta la carpeta `pipeline`.
+En Windows PowerShell, si `${PWD}` falla, usa la ruta absoluta a `pipeline`.
 
-Enseña las tres tallas de la búsqueda (lista frente a diccionario), el punto en polígono y la agregación por hora con y sin índice. Di que son tiempos de esta máquina, no una previsión. Cierra con una frase de coste con el supuesto a la vista: electricidad, almacenamiento o tiempo de desarrollo, y que una cuota gratuita no es coste cero. Si no tienes esa frase escrita, dilo en este plano; no hay otro documento en el repo que la respalde.
+Enseña las tres tallas: búsqueda lista vs diccionario; punto en polígono; agregación/búsqueda con y sin índice. Di que son tiempos de esta máquina. Cierra con:
 
-Criterio: reflexión.
+1. **Coste:** electricidad / equipo / tiempo de desarrollo; una cuota cloud gratuita no es coste total cero (supuestos en `docs/memoria.md`).
+2. **Limitación:** el feed de 24 h no reconcilia bajas fuera de ventana; el mapa 1:110m no es frontera legal (`docs/limitaciones.md` o memoria).
+3. **Mejora:** p. ej. calcular el país solo en la ingesta (ya hecho) o índice espacial si creciera el volumen.
 
-## 15. Cierre, en una sentada
+Criterio: **reflexión** (complejidad, memoria, costes, limitaciones, mejoras).
 
-Pantalla: el panel en directo, sin reproducción y sin filtros.
+## 15. Cierre: un evento de punta a punta
 
-Recorre en voz un identificador de la tabla: USGS, Kafka, consumidor, fila de `evento_actual`, API y círculo del mapa. Una decisión tuya, una sola: por ejemplo que el país sale del polígono y el mar se queda sin país, o que la comparación no baja de magnitud 4.
+Pantalla: el panel en directo, sin reproducción y sin filtros. Opcional: diccionario en `docs/memoria.md` (10 s).
 
-## Orden y duración orientativa
+Recorre en voz un `event_id` de la tabla: USGS → productor → Kafka → consumidor (validación + país) → `evento_actual` → API → círculo del mapa.  
+Una decisión técnica tuya, una sola: por ejemplo que el país sale del polígono y el mar queda sin país, o que la comparación no baja de magnitud 4.
 
-| Toma | Minutos | Qué cubre |
+Entregable §12: explicación individual del flujo y de una decisión propia.
+
+---
+
+## Orden y duración orientativa (~18–20 min)
+
+| Toma | Min | Rúbrica / prueba |
 |---|---|---|
-| 1–3 | 2 | Servicios, fuentes y tipos |
-| 4–5 | 3 | Calidad y nulos |
-| 6–8 | 3 | País, revisiones y cuarentena |
-| 9–11 | 4 | Análisis, filtros y tres conclusiones |
-| 12–13 | 2 | Reproducción y túnel |
-| 14–15 | 3 | Medición, coste y recorrido de un evento |
+| 1–3 | 3 | Extracción + Compose + tipos |
+| 4–5 | 3 | Calidad (doc + panel) |
+| 6–7–7b–8 | 4 | Modelado, mar, revisiones, reinicio, cuarentena |
+| 9–11 | 4 | Análisis, filtros, comparación, 3 conclusiones |
+| 12–13 | 2 | Reproducción + túnel |
+| 14–15 | 3 | Reflexión + flujo completo |
 
-No hace falta un segundo mapa, ni Spark, ni un panel de métricas aparte. Esas ausencias no se justifican en el vídeo.
+## Checklist rápido antes de cortar
+
+- [ ] Cinco servicios healthy  
+- [ ] Tres fuentes dichas en voz  
+- [ ] Tipos/unidades en un Feature  
+- [ ] ≥4 dimensiones de calidad con denominador y decisión  
+- [ ] País por polígono + «Sin país asignado»  
+- [ ] Revisiones / idempotencia / reinicio consumidor  
+- [ ] Cuarentena `prueba-malo`  
+- [ ] Ventanas + distribuciones + países  
+- [ ] Filtros coherentes mapa/gráficos/tabla  
+- [ ] Comparación equivalente + 3 conclusiones sin predicción  
+- [ ] REPRODUCCIÓN aislada  
+- [ ] Túnel caído y recuperado  
+- [ ] Medición + coste + limitación + mejora  
+- [ ] Un evento de punta a punta + una decisión propia  
+
+No hace falta Spark, ni un segundo mapa, ni un panel de calidad en Angular. Esas ausencias no se justifican en el vídeo.
