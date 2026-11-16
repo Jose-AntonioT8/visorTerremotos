@@ -1,5 +1,10 @@
-"""API de consulta. Lee PostgreSQL y no llama a USGS ni a Kafka."""
+"""API de consulta. Lee PostgreSQL para /api/eventos y no usa Kafka.
 
+Las rutas /api/fuentes/* son lecturas aditivas en vivo (IGN, USGS, EMSC)
+y no sustituyen el pipeline ni el contrato de /api/eventos.
+"""
+
+import asyncio
 import math
 import os
 from contextlib import asynccontextmanager
@@ -9,6 +14,9 @@ import asyncpg
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from fuentes import URLS as FUENTES_URLS
+from fuentes import leer_fuente
 
 POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
@@ -135,6 +143,31 @@ async def paises():
     ]
 
 
+@app.get("/api/fuentes")
+async def listar_fuentes():
+    return {
+        "fuentes": [
+            {"id": "ign", "nombre": "IGN (España)", "url": FUENTES_URLS["ign"]},
+            {"id": "usgs", "nombre": "USGS", "url": FUENTES_URLS["usgs"]},
+            {"id": "emsc", "nombre": "EMSC", "url": FUENTES_URLS["emsc"]},
+        ]
+    }
+
+
+@app.get("/api/fuentes/{fuente}")
+async def eventos_fuente(fuente: str):
+    clave = fuente.strip().lower()
+    if clave not in FUENTES_URLS:
+        return JSONResponse(status_code=404, content={"error": "Fuente no reconocida", "fuentes": list(FUENTES_URLS)})
+    try:
+        return await asyncio.to_thread(leer_fuente, clave)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"error": f"No se pudo leer la fuente {clave}", "detalle": str(exc), "url": FUENTES_URLS[clave]},
+        )
+
+
 @app.get("/api/eventos")
 async def eventos(
     start: datetime | None = None,
@@ -188,6 +221,7 @@ async def eventos(
                     "updated": fila["updated_ms"],
                     "country_id": fila["country_id"],
                     "country_name": fila["name_es"],
+                    "source": "usgs",
                 },
             }
         )

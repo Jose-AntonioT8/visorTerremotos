@@ -37,12 +37,14 @@ Filtros a implementar: `start` (ISO8601, inclusive), `end` (ISO8601, exclusive),
 
 Para limitar el tamaño, la API puede aplicar un máximo documentado de puntos. Si trunca, debe indicar `truncated: true`, el total completo y un mecanismo de paginación. El panel final deberá mostrarlo y no calcular estadísticas globales sobre una muestra truncada. El componente inicial espera una colección pequeña y completa.
 
-## Otros endpoints a implementar
+## Otros endpoints
 
 | Ruta | Resultado |
 |---|---|
 | GET /api/salud | Estado API y fecha de última ingesta; no credenciales |
 | GET /api/estadisticas | Conteos por hora UTC/país, distribuciones y comparación histórica |
+| GET /api/fuentes | Lista IGN, USGS y EMSC con sus URLs upstream |
+| GET /api/fuentes/{ign\|usgs\|emsc} | Lectura en vivo normalizada a GeoJSON (`properties.source`) |
 
 Los filtros de estadísticas deben equivaler a los del mapa. Cada resultado debe indicar periodo, filtros, unidad y registros sin valor. Si la base falla, devuelve un error explícito; no cero eventos como si fuera un resultado válido.
 

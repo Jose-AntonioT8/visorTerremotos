@@ -2,20 +2,28 @@
   <header>
     <p class="eyebrow">BIG DATA · PROYECTO DE AULA</p>
     <h1>Observatorio de actividad sísmica</h1>
-    <p>Mapa base, fronteras y eventos en capas independientes.</p>
+    <p>Globo 3D interactivo con eventos en vivo de IGN, USGS y EMSC.</p>
   </header>
   <section class="info" aria-live="polite">
     <strong>{{ mode() }}</strong>
     <p>{{ status() }}</p>
     <p>{{ countriesStatus() }} · {{ count() }} eventos dibujados · {{ omitted() }} omitidos por coordenadas inválidas</p>
     <small>Última lectura UTC: {{ lastRead() }}<br>Generación de la respuesta UTC: {{ generated() }}<br>Última ingesta USGS UTC: {{ ingestion() }}</small>
+    @if (ingestionWarning()) { <p class="warn">{{ ingestionWarning() }}</p> }
+    @if (sourceStatus()) { <p>{{ sourceStatus() }}</p> }
     @if (reproduction()) { <p>REPRODUCCIÓN. Estos eventos no entran en el análisis en vivo. Se conserva la fecha original del sismo.</p> }
     @if (truncated()) {
-      <p>El mapa y la tabla muestran un recorte de {{ count() }} sobre {{ resultCount() }}. Las estadísticas no salen de ese recorte: la API las calcula sobre la consulta completa.</p>
+      <p>El globo y la tabla muestran un recorte de {{ count() }} sobre {{ resultCount() }}. Las estadísticas no salen de ese recorte: la API las calcula sobre la consulta completa.</p>
     }
   </section>
 
   <form class="filters" (submit)="applyFilters($event)">
+    <fieldset class="sources">
+      <legend>Fuentes en el globo</legend>
+      <label class="source-option"><input type="checkbox" [checked]="sourceIgn()" (change)="toggleSource('ign', sourceChecked($event))"> IGN</label>
+      <label class="source-option"><input type="checkbox" [checked]="sourceUsgs()" (change)="toggleSource('usgs', sourceChecked($event))"> USGS</label>
+      <label class="source-option"><input type="checkbox" [checked]="sourceEmsc()" (change)="toggleSource('emsc', sourceChecked($event))"> EMSC</label>
+    </fieldset>
     <label>Desde UTC <input type="datetime-local" [value]="filterStart()" (input)="filterStart.set(inputValue($event))"></label>
     <label>Hasta UTC, excluido <input type="datetime-local" [value]="filterEnd()" (input)="filterEnd.set(inputValue($event))"></label>
     <label>Magnitud mínima <input type="number" step="0.1" [value]="filterMag()" (input)="filterMag.set(inputValue($event))"></label>
@@ -33,11 +41,39 @@
       </select>
     </label>
     <button type="submit">Aplicar</button>
+    <button type="button" (click)="clearFilters()">Limpiar</button>
     <button type="button" (click)="toggleReproduction()">{{ reproduction() ? 'Volver al directo' : 'Ver reproducción' }}</button>
   </form>
-  <p class="note">Las fechas del filtro se leen como UTC. El filtro de fechas cambia el mapa, la tabla, las ventanas y las distribuciones. No cambia los dos periodos de la comparación.</p>
+  <p class="note">Las fechas del filtro se leen como UTC. Puedes activar una, varias o las tres fuentes (IGN, USGS, EMSC). El globo y la tabla usan esas lecturas en vivo; las estadísticas siguen saliendo del pipeline propio. En reproducción el filtro de fuentes no aplica.</p>
 
-  <div class="map" leaflet [leafletOptions]="options" (leafletMapReady)="onMapReady($event)" aria-label="Mapa interactivo de terremotos"></div>
+  <section class="globe-panel">
+    <div class="globe-toolbar">
+      <p>Arrastra para rotar · rueda o pellizco para zoom · clic en un punto para la ficha</p>
+      <button type="button" class="ghost" (click)="toggleAutoRotate()">
+        {{ autoRotate() ? 'Pausar auto-rotación' : 'Reanudar auto-rotación' }}
+      </button>
+    </div>
+    <div class="globe-stage">
+      <div #globeHost class="globe" role="img" aria-label="Globo 3D interactivo de terremotos"></div>
+      @if (selected(); as quake) {
+        <aside class="quake-card" aria-live="polite">
+          <header>
+            <strong>{{ quake.place }}</strong>
+            <button type="button" class="ghost" (click)="clearSelection()" aria-label="Cerrar ficha">×</button>
+          </header>
+          <dl>
+            <div><dt>Magnitud</dt><dd>{{ quake.mag }}</dd></div>
+            <div><dt>Profundidad</dt><dd>{{ quake.depth }}</dd></div>
+            <div><dt>Fecha UTC</dt><dd>{{ quake.time }}</dd></div>
+            <div><dt>País</dt><dd>{{ quake.country }}</dd></div>
+            <div><dt>Fuente</dt><dd>{{ quake.source }}</dd></div>
+            <div><dt>ID</dt><dd>{{ quake.id }}</dd></div>
+          </dl>
+        </aside>
+      }
+    </div>
+    <p class="attribution">Texturas de demostración three-globe · Fuentes: IGN, USGS, EMSC · Fronteras Natural Earth omitidas en el globo (peso WebGL); el catálogo de países sigue alimentando los filtros.</p>
+  </section>
 
   @if (stats(); as data) {
     <section class="analysis">
@@ -91,7 +127,7 @@
       <p>Media diaria de {{ data.comparacion.historico.anio }}: {{ data.comparacion.historico.media_diaria }} eventos por día. Total {{ data.comparacion.historico.total }} / {{ data.comparacion.historico.dias }} días, incluidos los días en cero.</p>
       <p>Ámbito: {{ scopeLabel() }}. Corte de magnitud: ≥ {{ data.comparacion.corte_magnitud }}.</p>
       @if (data.comparacion.corte_forzado_a_4) {
-        <p>El filtro de magnitud del mapa está vacío o por debajo de 4. La comparación se mantiene en 4 o más para no mezclar el feed reciente con un histórico ya recortado.</p>
+        <p>El filtro de magnitud del globo está vacío o por debajo de 4. La comparación se mantiene en 4 o más para no mezclar el feed reciente con un histórico ya recortado.</p>
       }
       <p>Variación del periodo reciente respecto a la media diaria: {{ variation() }}.</p>
       <p>{{ data.comparacion.aviso }}</p>
@@ -116,17 +152,19 @@
               <th scope="col">Profundidad (km)</th>
               <th scope="col">País</th>
               <th scope="col">Lugar</th>
+              <th scope="col">Fuente</th>
               <th scope="col">Identificador</th>
             </tr>
           </thead>
           <tbody>
-            @for (row of tableRows(); track row.id) {
+            @for (row of tableRows(); track row.source + '-' + row.id) {
               <tr>
                 <td>{{ row.time }}</td>
                 <td>{{ row.mag }}</td>
                 <td>{{ row.depth }}</td>
                 <td>{{ row.country }}</td>
                 <td>{{ row.place }}</td>
+                <td>{{ row.source }}</td>
                 <td>{{ row.id }}</td>
               </tr>
             }
@@ -145,6 +183,6 @@
   <footer>
     <strong>Profundidad</strong>
     <span>🟡 Menos de 70 km</span><span>🟠 70–299,99 km</span><span>🟣 300 km o más</span><span>⚪ No disponible</span>
-    <p>Tamaño: escala visual creciente con la magnitud; no representa energía ni área afectada. Sin magnitud: radio mínimo. El mapa base puede desactivarse en el selector de capas.</p>
+    <p>Tamaño y altura del marcador crecen con la magnitud (escala visual). Los anillos de pulso se limitan a los 40 eventos de mayor magnitud. Se requiere WebGL.</p>
   </footer>
 </main>

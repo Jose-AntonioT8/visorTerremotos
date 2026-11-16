@@ -28,11 +28,19 @@
 
 ## Sismicidad y docencia
 
-- Feed: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson
-- Formato: https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php
-- Histórico: https://earthquake.usgs.gov/fdsnws/event/1/
-- Sesiones: https://juanarrow.github.io/BigData/sesiones/index.html
-- Rúbrica: https://juanarrow.github.io/BigData/sesiones/sesion-08.html
+Lecturas en vivo del visor (filtro multi-fuente en la UI; propiedad `source`: `ign` | `usgs` | `emsc`):
+
+| Fuente | Endpoint usado | Formato |
+|---|---|---|
+| USGS | https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson | GeoJSON |
+| EMSC | https://www.seismicportal.eu/fdsnws/event/1/query?limit=500&format=json | GeoJSON (FDSN) |
+| IGN (España) | https://www.ign.es/ign/RssTools/sismologia.xml | GeoRSS (últimos ~10 días, área ibérica/Canarias) |
+
+También: formato USGS https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php · histórico USGS https://earthquake.usgs.gov/fdsnws/event/1/ · portal IGN https://www.ign.es/web/ign/portal · EMSC https://www.emsc.eu/
+
+El pipeline propio (`GET /api/eventos`) sigue alimentándose del feed USGS y no se elimina. Las rutas aditivas `GET /api/fuentes/{ign|usgs|emsc}` normalizan las tres lecturas. En Netlify, el edge proxy puede servir esas rutas sin pasar por el túnel.
+
+Sesiones: https://juanarrow.github.io/BigData/sesiones/index.html · Rúbrica: https://juanarrow.github.io/BigData/sesiones/sesion-08.html
 
 Los eventos del archivo `terremotos-demo.geojson` son ficticios y están marcados como demostración. No utilizarlos para extraer conclusiones sobre sismicidad real.
 

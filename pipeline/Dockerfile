@@ -5,6 +5,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY productor.py consumidor.py paises.py api.py ./
+COPY productor.py consumidor.py paises.py api.py fuentes.py ./
 
 USER nobody

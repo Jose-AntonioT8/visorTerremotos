@@ -1,1 +1,13 @@
-body { margin: 0; background: #eef3f6; color: #132b40; font-family: system-ui, sans-serif; } * { box-sizing: border-box; } .leaflet-popup-content { white-space: pre-line; }
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, #16324f 0%, transparent 55%),
+    linear-gradient(180deg, #070b14 0%, #0b1220 40%, #0a101c 100%);
+  color: #e8eef4;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+* { box-sizing: border-box; }
