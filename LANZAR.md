@@ -18,7 +18,7 @@ En otra terminal:
 ngrok http 8000
 ```
 
-La web no llama a ngrok desde el navegador. `frontend/public/config.json` apunta a `https://visorterremotos.netlify.app` y Netlify reenvía `/api/*` al túnel. La URL del túnel está en `frontend/netlify/edge-functions/proxy-api.js`.
+La web no llama a ngrok ni a IGN/USGS/EMSC desde el navegador. `frontend/public/config.json` apunta a `https://visorterremotos.netlify.app` y Netlify reenvía todo `/api/*` (incluido `/api/fuentes/*`) al túnel → contenedor `api`. Las lecturas de fuentes las hace Docker (`pipeline/fuentes.py`). La URL del túnel está en `frontend/netlify/edge-functions/proxy-api.js`.
 
 ## 3. Ver los terremotos en Netlify
 

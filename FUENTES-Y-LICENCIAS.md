@@ -38,7 +38,7 @@ Lecturas en vivo del visor (filtro multi-fuente en la UI; propiedad `source`: `i
 
 También: formato USGS https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php · histórico USGS https://earthquake.usgs.gov/fdsnws/event/1/ · portal IGN https://www.ign.es/web/ign/portal · EMSC https://www.emsc.eu/
 
-El pipeline propio (`GET /api/eventos`) sigue alimentándose del feed USGS y no se elimina. Las rutas aditivas `GET /api/fuentes/{ign|usgs|emsc}` normalizan las tres lecturas. En Netlify, el edge proxy puede servir esas rutas sin pasar por el túnel.
+El pipeline propio (`GET /api/eventos`) sigue alimentándose del feed USGS y no se elimina. Las rutas aditivas `GET /api/fuentes/{ign|usgs|emsc}` viven en el contenedor Docker `api` (`pipeline/fuentes.py`) y normalizan las tres lecturas. Netlify solo reenvía `/api/*` al túnel; no consulta las fuentes externas en el edge.
 
 Sesiones: https://juanarrow.github.io/BigData/sesiones/index.html · Rúbrica: https://juanarrow.github.io/BigData/sesiones/sesion-08.html
 

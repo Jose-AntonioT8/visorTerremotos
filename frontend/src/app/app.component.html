@@ -10,6 +10,7 @@
     <p>{{ countriesStatus() }} · {{ count() }} eventos dibujados · {{ omitted() }} omitidos por coordenadas inválidas</p>
     <small>Última lectura UTC: {{ lastRead() }}<br>Generación de la respuesta UTC: {{ generated() }}<br>Última ingesta USGS UTC: {{ ingestion() }}</small>
     @if (ingestionWarning()) { <p class="warn">{{ ingestionWarning() }}</p> }
+    @if (cacheNotice()) { <p class="warn">{{ cacheNotice() }}</p> }
     @if (sourceStatus()) { <p>{{ sourceStatus() }}</p> }
     @if (reproduction()) { <p>REPRODUCCIÓN. Estos eventos no entran en el análisis en vivo. Se conserva la fecha original del sismo.</p> }
     @if (truncated()) {
@@ -44,7 +45,7 @@
     <button type="button" (click)="clearFilters()">Limpiar</button>
     <button type="button" (click)="toggleReproduction()">{{ reproduction() ? 'Volver al directo' : 'Ver reproducción' }}</button>
   </form>
-  <p class="note">Las fechas del filtro se leen como UTC. Puedes activar una, varias o las tres fuentes (IGN, USGS, EMSC). El globo y la tabla usan esas lecturas en vivo; las estadísticas siguen saliendo del pipeline propio. En reproducción el filtro de fuentes no aplica.</p>
+  <p class="note">Las fechas del filtro se leen como UTC. IGN, USGS y EMSC se consultan en el contenedor Docker de la API (`/api/fuentes/*`); el navegador no llama a esas fuentes. Las estadísticas siguen del pipeline (`/api/estadisticas`). En reproducción el filtro de fuentes no aplica.</p>
 
   <section class="globe-panel">
     <div class="globe-toolbar">
@@ -72,7 +73,7 @@
         </aside>
       }
     </div>
-    <p class="attribution">Texturas de demostración three-globe · Fuentes: IGN, USGS, EMSC · Fronteras Natural Earth omitidas en el globo (peso WebGL); el catálogo de países sigue alimentando los filtros.</p>
+    <p class="attribution">Texturas de demostración three-globe · Fuentes: IGN, USGS, EMSC · Fronteras: Natural Earth 1:110m (dominio público)</p>
   </section>
 
   @if (stats(); as data) {

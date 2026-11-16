@@ -1,6 +1,6 @@
 import { AfterViewInit, Component, ElementRef, NgZone, OnDestroy, ViewChild, inject, signal } from '@angular/core';
 import Globe, { type GlobeInstance } from 'globe.gl';
-import type { FeatureCollection, Point } from 'geojson';
+import type { Feature, FeatureCollection, Geometry, Point } from 'geojson';
 
 type SourceId = 'ign' | 'usgs' | 'emsc';
 type Properties = {
@@ -15,7 +15,6 @@ type Events = FeatureCollection<Point, Properties> & {
 };
 type Config = {
   mode: 'demo' | 'api'; apiUrl: string; refreshMs: number; skipNgrokWarning: boolean;
-  fuentes?: Partial<Record<SourceId, string>>;
 };
 type CountryOption = { country_id: string; name_es: string; subregion: string | null };
 type Bucket = { etiqueta: string; total: number };
@@ -43,8 +42,8 @@ type TableRow = { id: string; time: string; mag: string; depth: string; country:
 type QuakePoint = {
   lat: number;
   lng: number;
-  size: number;
-  radius: number;
+  /** Radio base en grados; se escala con el zoom de la cámara. */
+  baseRadius: number;
   color: string;
   place: string;
   mag: string;
@@ -60,6 +59,15 @@ const SOURCE_LABEL: Record<SourceId, string> = { ign: 'IGN', usgs: 'USGS', emsc:
 const EARTH_NIGHT = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg';
 const EARTH_TOPO = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png';
 const NIGHT_SKY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png';
+const CACHE_KEY = 'observatorio-sismico-cache-v1';
+const CACHE_MAX_FEATURES = 800;
+
+type SourceCache = {
+  version: 1;
+  savedAt: number;
+  sources: Partial<Record<SourceId, Events>>;
+  stats?: Stats | null;
+};
 
 @Component({
   selector: 'app-root', standalone: true, imports: [],
@@ -96,6 +104,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   readonly reproduction = signal(false);
   readonly selected = signal<QuakePoint | null>(null);
   readonly autoRotate = signal(true);
+  readonly cacheNotice = signal('');
 
   private globe?: GlobeInstance;
   private timer?: ReturnType<typeof setTimeout>;
@@ -104,9 +113,14 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   private destroyed = false;
   private activeConfig?: Config;
   private resizeObserver?: ResizeObserver;
+  /** 1 = alejados; baja al hacer zoom (puntos más pequeños y fáciles de seleccionar). */
+  private radiusScale = 1;
+  private radiusRaf = 0;
+  private readonly onControlsChange = (): void => this.scheduleRadiusScale();
 
   async ngAfterViewInit(): Promise<void> {
     this.initGlobe();
+    await this.loadCountryBorders();
     try {
       const config = await this.readJson<Config>('config.json');
       if (!['demo', 'api'].includes(config.mode)) throw new Error('Modo inválido');
@@ -117,17 +131,46 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         if (config.skipNgrokWarning) headers['ngrok-skip-browser-warning'] = '1';
         try {
           this.countries.set(await this.readJson<CountryOption[]>(`${config.apiUrl.replace(/\/$/, '')}/api/paises`, headers));
-          this.countriesStatus.set('Catálogo de países cargado');
+          this.countriesStatus.set('Fronteras en el globo · catálogo de filtros cargado');
         } catch {
           this.countries.set([]);
-          this.countriesStatus.set('No se pudo cargar el catálogo de países');
+          this.countriesStatus.set('Fronteras en el globo · catálogo de filtros no disponible');
         }
       } else {
-        this.countriesStatus.set('Modo demo: catálogo de países no requerido');
+        this.countriesStatus.set('Fronteras en el globo · modo demo');
       }
       await this.refresh(config);
     } catch {
       this.status.set('Error: revisa public/config.json');
+    }
+  }
+
+  /** Contornos Natural Earth 1:110m (más ligeros que 10m para WebGL). */
+  private async loadCountryBorders(): Promise<void> {
+    if (!this.globe) return;
+    try {
+      const collection = await this.readJson<FeatureCollection<Geometry, { NAME_ES?: string; ADMIN?: string }>>(
+        'datos/paises.geojson'
+      );
+      const features = (collection.features ?? []).filter(
+        (feature): feature is Feature<Geometry, { NAME_ES?: string; ADMIN?: string }> =>
+          Boolean(feature?.geometry) && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')
+      );
+      this.globe
+        .polygonsData(features)
+        .polygonGeoJsonGeometry('geometry')
+        .polygonCapColor(() => 'rgba(0, 0, 0, 0)')
+        .polygonSideColor(() => 'rgba(0, 0, 0, 0)')
+        .polygonStrokeColor(() => 'rgba(186, 210, 230, 0.72)')
+        .polygonAltitude(0.004)
+        .polygonCapCurvatureResolution(4)
+        .polygonsTransitionDuration(0)
+        .polygonLabel((d: object) => {
+          const props = (d as Feature<Geometry, { NAME_ES?: string; ADMIN?: string }>).properties;
+          return props?.NAME_ES ?? props?.ADMIN ?? 'Sin nombre';
+        });
+    } catch {
+      this.countriesStatus.set('No se pudieron cargar las fronteras del globo');
     }
   }
 
@@ -143,17 +186,18 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       .pointsData([])
       .pointLat('lat')
       .pointLng('lng')
-      .pointAltitude('size')
-      .pointRadius('radius')
+      // Altitud casi nula: discos planos sobre la superficie (no cilindros).
+      .pointAltitude(0.001)
+      .pointRadius((d: object) => (d as QuakePoint).baseRadius * this.radiusScale)
       .pointColor('color')
       .pointLabel('label')
       .pointsMerge(false)
-      .pointsTransitionDuration(600)
+      .pointsTransitionDuration(0)
       .ringsData([])
       .ringLat('lat')
       .ringLng('lng')
       .ringColor((d: object) => (d as QuakePoint).color)
-      .ringMaxRadius(2.8)
+      .ringMaxRadius(() => 0.55 + this.radiusScale * 2.25)
       .ringPropagationSpeed(1.4)
       .ringRepeatPeriod(1400)
       .onPointClick((point) => {
@@ -170,6 +214,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     controls.enableDamping = true;
     controls.minDistance = 120;
     controls.maxDistance = 500;
+    controls.addEventListener('change', this.onControlsChange);
+    this.applyRadiusScale();
 
     const pause = (): void => this.zone.run(() => this.pauseAutoRotate());
     host.addEventListener('pointerdown', pause);
@@ -181,6 +227,30 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       this.resizeObserver = new ResizeObserver(() => this.resizeGlobe());
       this.resizeObserver.observe(host);
     });
+  }
+
+  private scheduleRadiusScale(): void {
+    if (this.radiusRaf || this.destroyed) return;
+    this.radiusRaf = requestAnimationFrame(() => {
+      this.radiusRaf = 0;
+      this.applyRadiusScale();
+    });
+  }
+
+  /** Acercar cámara → puntos más pequeños; alejar → más grandes. */
+  private applyRadiusScale(): void {
+    if (!this.globe || this.destroyed) return;
+    const controls = this.globe.controls();
+    const min = controls.minDistance;
+    const max = controls.maxDistance;
+    const distance = controls.getDistance();
+    const t = Math.min(1, Math.max(0, (distance - min) / Math.max(1, max - min)));
+    // Zoom máximo (cerca): ~12 % del radio base; zoom mínimo (lejos): 100 %.
+    this.radiusScale = 0.12 + t * 0.88;
+    // Reaplicar accessors para que three-globe regenere la geometría.
+    this.globe
+      .pointRadius((d: object) => (d as QuakePoint).baseRadius * this.radiusScale)
+      .ringMaxRadius(0.55 + this.radiusScale * 2.25);
   }
 
   private resizeGlobe(): void {
@@ -253,90 +323,63 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       if (config.mode === 'api' && config.skipNgrokWarning) headers['ngrok-skip-browser-warning'] = '1';
 
       let data: Events;
+      let usedCache = false;
       if (config.mode === 'demo') {
         data = await this.readJson<Events>('datos/terremotos-demo.geojson', headers);
         this.sourceStatus.set('Modo demo: el filtro de fuentes no aplica');
+        this.cacheNotice.set('');
       } else if (this.reproduction()) {
         data = await this.readJson<Events>(`${base}/api/eventos${this.query(true)}`, headers);
         this.sourceStatus.set('Reproducción del pipeline: el filtro de fuentes no aplica');
+        this.cacheNotice.set('');
       } else {
-        data = await this.loadSources(base, headers, config);
+        const loaded = await this.loadSources(base, headers);
+        data = loaded.data;
+        usedCache = loaded.usedCache;
       }
 
       if (this.destroyed) return;
-      if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('Se esperaba FeatureCollection');
-
-      const points: QuakePoint[] = [];
-      const rows: TableRow[] = [];
-      let omitted = 0;
-
-      for (const feature of data.features) {
-        const p = feature.properties;
-        const c = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : [];
-        const [lon, lat, depth] = c;
-        const magnitude = p && typeof p.mag === 'number' && Number.isFinite(p.mag) ? p.mag : null;
-        const depthOk = typeof depth === 'number' && Number.isFinite(depth);
-        const source = (p?.source as string) || 'nd';
-        const fuenteTxt = SOURCE_LABEL[source as SourceId] ?? (source === 'nd' ? 'ND' : String(source).toUpperCase());
-        const place = p?.place ?? 'Sin descripción';
-        const country = p?.country_name ?? 'Sin país asignado';
-        const time = this.date(p?.time);
-        const id = String(feature.id ?? 'ND');
-        const magLabel = magnitude === null ? 'ND' : String(magnitude);
-        const depthLabel = depthOk ? `${depth} km` : 'ND';
-
-        rows.push({
-          id, time, mag: magLabel, depth: depthOk ? String(depth) : 'ND', country, place, source: fuenteTxt,
-        });
-
-        if (!p || !Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lon) > 180 || Math.abs(lat) > 90) {
-          omitted++;
-          continue;
-        }
-
-        const color = !depthOk ? '#94a3b8' : depth < 70 ? '#f5c542' : depth < 300 ? '#ff6b3d' : '#a78bfa';
-        const radius = magnitude === null ? 0.22 : Math.max(0.18, Math.min(1.1, 0.18 + (magnitude + 1) * 0.12));
-        const size = magnitude === null ? 0.012 : Math.max(0.01, Math.min(0.12, 0.01 + magnitude * 0.012));
-        points.push({
-          lat, lng: lon, size, radius, color, place,
-          mag: magLabel, depth: depthLabel, time, country, source: fuenteTxt, id,
-          label: `${place}\nMag ${magLabel} · ${depthLabel}`,
-        });
-      }
-
-      this.globe?.pointsData(points);
-      // Anillos de pulso solo para un subconjunto (los de mayor magnitud) para no saturar WebGL.
-      const rings = [...points]
-        .sort((a, b) => Number(b.mag === 'ND' ? -1 : b.mag) - Number(a.mag === 'ND' ? -1 : a.mag))
-        .slice(0, Math.min(40, points.length));
-      this.globe?.ringsData(rings);
-
-      this.count.set(points.length);
-      this.omitted.set(omitted);
-      this.tableRows.set(rows);
-      this.truncated.set(Boolean(data.metadata?.truncated));
-      this.resultCount.set(data.metadata?.count ?? points.length);
-      this.lastRead.set(new Date().toISOString());
-      this.generated.set(this.date(data.metadata?.generated));
-      this.ingestion.set(this.date(data.metadata?.last_ingestion));
-      const ingestedAt = data.metadata?.last_ingestion;
-      const ingestaVieja = typeof ingestedAt === 'number' && Number.isFinite(ingestedAt) && Date.now() - ingestedAt > 5 * 60 * 1000;
-      this.ingestionWarning.set(ingestaVieja ? 'El productor parece parado: la última ingesta USGS supera 5 minutos, aunque la API responda.' : '');
+      this.paintEvents(data, usedCache);
 
       if (config.mode === 'api') {
         try {
-          this.stats.set(await this.readJson<Stats>(`${base}/api/estadisticas${this.query(false)}`, headers));
+          const stats = await this.readJson<Stats>(`${base}/api/estadisticas${this.query(false)}`, headers);
+          this.stats.set(stats);
+          if (!this.reproduction()) this.saveStatsToCache(stats);
         } catch {
-          this.stats.set(null);
-          if (!this.reproduction()) {
-            this.status.set('El globo se actualizó con las fuentes seleccionadas, pero las estadísticas del pipeline no respondieron.');
-            return;
+          const cachedStats = this.readCache()?.stats ?? null;
+          if (cachedStats) {
+            this.stats.set(cachedStats);
+            if (!usedCache) {
+              this.status.set('Eventos actualizados; estadísticas desde la última copia local (API Docker no respondió).');
+              return;
+            }
+          } else {
+            this.stats.set(null);
+            if (!this.reproduction() && !usedCache) {
+              this.status.set('El globo se actualizó con las fuentes seleccionadas, pero las estadísticas del pipeline no respondieron.');
+              return;
+            }
           }
         }
       }
-      this.status.set(config.mode === 'demo' ? 'Ejemplo estático: no representa actividad real' : 'API accesible · consulta completada');
+      if (usedCache) {
+        this.status.set('API Docker no disponible · mostrando la última copia guardada en el navegador');
+      } else {
+        this.status.set(config.mode === 'demo' ? 'Ejemplo estático: no representa actividad real' : 'API accesible · consulta completada');
+      }
     } catch {
-      if (!this.destroyed) this.status.set('No se pudo actualizar: se conserva la última lectura. Revisa API, túnel y CORS.');
+      if (this.destroyed) return;
+      const cached = this.eventsFromCache(this.selectedSources());
+      if (cached && cached.features.length > 0) {
+        this.paintEvents(cached, true);
+        const cachedStats = this.readCache()?.stats ?? null;
+        if (cachedStats) this.stats.set(cachedStats);
+        this.sourceStatus.set('Sin respuesta de Docker · datos desde copia local');
+        this.status.set('API Docker no disponible · mostrando la última copia guardada en el navegador');
+      } else {
+        this.status.set('No se pudo actualizar y no hay copia local. Revisa API, túnel y CORS.');
+      }
     } finally {
       if (!this.destroyed && config.mode === 'api') {
         this.timer = setTimeout(() => void this.refresh(config), Math.max(30000, Number(config.refreshMs) || 60000));
@@ -344,38 +387,218 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private async loadSources(base: string, headers: Record<string, string>, config: Config): Promise<Events> {
+  private paintEvents(data: Events, fromCache: boolean): void {
+    if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('Se esperaba FeatureCollection');
+
+    const points: QuakePoint[] = [];
+    const rows: TableRow[] = [];
+    let omitted = 0;
+
+    for (const feature of data.features) {
+      const p = feature.properties;
+      const c = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : [];
+      const [lon, lat, depth] = c;
+      const magnitude = p && typeof p.mag === 'number' && Number.isFinite(p.mag) ? p.mag : null;
+      const depthOk = typeof depth === 'number' && Number.isFinite(depth);
+      const source = (p?.source as string) || 'nd';
+      const fuenteTxt = SOURCE_LABEL[source as SourceId] ?? (source === 'nd' ? 'ND' : String(source).toUpperCase());
+      const place = p?.place ?? 'Sin descripción';
+      const country = p?.country_name ?? 'Sin país asignado';
+      const time = this.date(p?.time);
+      const id = String(feature.id ?? 'ND');
+      const magLabel = magnitude === null ? 'ND' : String(magnitude);
+      const depthLabel = depthOk ? `${depth} km` : 'ND';
+
+      rows.push({
+        id, time, mag: magLabel, depth: depthOk ? String(depth) : 'ND', country, place, source: fuenteTxt,
+      });
+
+      if (!p || !Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lon) > 180 || Math.abs(lat) > 90) {
+        omitted++;
+        continue;
+      }
+
+      const color = !depthOk ? '#94a3b8' : depth < 70 ? '#f5c542' : depth < 300 ? '#ff6b3d' : '#a78bfa';
+      const baseRadius = magnitude === null ? 0.28 : Math.max(0.22, Math.min(1.35, 0.22 + (magnitude + 1) * 0.14));
+      points.push({
+        lat, lng: lon, baseRadius, color, place,
+        mag: magLabel, depth: depthLabel, time, country, source: fuenteTxt, id,
+        label: `${place}\nMag ${magLabel} · ${depthLabel}`,
+      });
+    }
+
+    this.applyRadiusScale();
+    this.globe?.pointsData(points);
+    const rings = [...points]
+      .sort((a, b) => Number(b.mag === 'ND' ? -1 : b.mag) - Number(a.mag === 'ND' ? -1 : a.mag))
+      .slice(0, Math.min(40, points.length));
+    this.globe?.ringsData(rings);
+
+    this.count.set(points.length);
+    this.omitted.set(omitted);
+    this.tableRows.set(rows);
+    this.truncated.set(Boolean(data.metadata?.truncated));
+    this.resultCount.set(data.metadata?.count ?? points.length);
+    this.lastRead.set(fromCache ? this.cacheSavedLabel() : new Date().toISOString());
+    this.generated.set(this.date(data.metadata?.generated));
+    this.ingestion.set(this.date(data.metadata?.last_ingestion));
+    const ingestedAt = data.metadata?.last_ingestion;
+    const ingestaVieja = typeof ingestedAt === 'number' && Number.isFinite(ingestedAt) && Date.now() - ingestedAt > 5 * 60 * 1000;
+    this.ingestionWarning.set(ingestaVieja ? 'El productor parece parado: la última ingesta USGS supera 5 minutos, aunque la API responda.' : '');
+    this.cacheNotice.set(fromCache
+      ? `Copia local del ${this.cacheSavedLabel()} (Docker apagado o sin respuesta).`
+      : '');
+  }
+
+  /** Solo habla con la API Docker (`/api/fuentes/*`); guarda cada lectura OK en localStorage. */
+  private async loadSources(base: string, headers: Record<string, string>): Promise<{ data: Events; usedCache: boolean }> {
     const selected = this.selectedSources();
     if (selected.length === 0) {
       this.sourceStatus.set('Ninguna fuente activa: marca IGN, USGS o EMSC');
-      return { type: 'FeatureCollection', metadata: { generated: Date.now(), count: 0 }, features: [] };
+      this.cacheNotice.set('');
+      return {
+        data: { type: 'FeatureCollection', metadata: { generated: Date.now(), count: 0 }, features: [] },
+        usedCache: false,
+      };
     }
-    const results = await Promise.all(selected.map(async (source) => {
-      const custom = config.fuentes?.[source];
-      const url = custom || `${base}/api/fuentes/${source}`;
+
+    const live: SourceId[] = [];
+    const cached: SourceId[] = [];
+    const failed: string[] = [];
+    const bags: { source: SourceId; data: Events }[] = [];
+
+    await Promise.all(selected.map(async (source) => {
+      const url = `${base}/api/fuentes/${source}`;
       try {
         const data = await this.readJson<Events>(url, headers);
-        return { source, data, error: null as string | null };
+        if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('formato');
+        this.saveSourceToCache(source, data);
+        live.push(source);
+        bags.push({ source, data });
       } catch (error) {
-        return { source, data: null, error: error instanceof Error ? error.message : 'error' };
+        const fromDisk = this.readCache()?.sources?.[source];
+        if (fromDisk?.features?.length) {
+          cached.push(source);
+          bags.push({ source, data: fromDisk });
+        } else {
+          failed.push(`${SOURCE_LABEL[source]} (${error instanceof Error ? error.message : 'error'})`);
+        }
       }
     }));
-    const ok = results.filter((item) => item.data);
-    const fail = results.filter((item) => item.error);
+
     this.sourceStatus.set([
-      ok.length ? `OK: ${ok.map((item) => SOURCE_LABEL[item.source]).join(', ')}` : '',
-      fail.length ? `Fallos: ${fail.map((item) => `${SOURCE_LABEL[item.source]} (${item.error})`).join(', ')}` : '',
+      live.length ? `API Docker OK: ${live.map((s) => SOURCE_LABEL[s]).join(', ')}` : '',
+      cached.length ? `Copia local: ${cached.map((s) => SOURCE_LABEL[s]).join(', ')}` : '',
+      failed.length ? `Sin datos: ${failed.join(', ')}` : '',
     ].filter(Boolean).join(' · ') || 'Sin lecturas');
-    if (ok.length === 0) throw new Error('Ninguna fuente respondió');
-    const features = ok.flatMap((item) => (item.data?.features ?? []).map((feature) => {
+
+    if (bags.length === 0) throw new Error('Ninguna fuente respondió');
+
+    const features = bags.flatMap((item) => (item.data.features ?? []).map((feature) => {
+      const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? item.source };
+      return { ...feature, properties };
+    })).filter((feature) => this.passesClientFilters(feature.properties));
+
+    return {
+      data: {
+        type: 'FeatureCollection',
+        metadata: { generated: Date.now(), count: features.length, mode: cached.length && !live.length ? 'cache' : 'fuentes' },
+        features,
+      },
+      usedCache: live.length === 0 && cached.length > 0,
+    };
+  }
+
+  private readCache(): SourceCache | null {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as SourceCache;
+      if (parsed?.version !== 1 || typeof parsed.savedAt !== 'number') return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeCache(next: SourceCache): void {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(next));
+    } catch {
+      // Cuota llena: recortar features y reintentar una vez.
+      const trimmed: SourceCache = {
+        ...next,
+        sources: Object.fromEntries(
+          Object.entries(next.sources).map(([key, value]) => [key, value ? this.trimEvents(value) : value])
+        ) as SourceCache['sources'],
+      };
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
+      } catch {
+        /* sin espacio: se conserva lo que ya hubiera */
+      }
+    }
+  }
+
+  private trimEvents(data: Events): Events {
+    const features = [...(data.features ?? [])]
+      .sort((a, b) => (Number(b.properties?.time) || 0) - (Number(a.properties?.time) || 0))
+      .slice(0, CACHE_MAX_FEATURES);
+    return {
+      ...data,
+      features,
+      metadata: { ...data.metadata, count: features.length, truncated: true },
+    };
+  }
+
+  private saveSourceToCache(source: SourceId, data: Events): void {
+    const slim = this.trimEvents({
+      type: 'FeatureCollection',
+      metadata: {
+        generated: data.metadata?.generated ?? Date.now(),
+        count: data.features?.length ?? 0,
+        source,
+        mode: data.metadata?.mode,
+        last_ingestion: data.metadata?.last_ingestion ?? null,
+      },
+      features: data.features ?? [],
+    });
+    const prev = this.readCache();
+    this.writeCache({
+      version: 1,
+      savedAt: Date.now(),
+      sources: { ...(prev?.sources ?? {}), [source]: slim },
+      stats: prev?.stats ?? null,
+    });
+  }
+
+  private saveStatsToCache(stats: Stats): void {
+    const prev = this.readCache() ?? { version: 1 as const, savedAt: Date.now(), sources: {} };
+    this.writeCache({ ...prev, savedAt: prev.savedAt || Date.now(), stats });
+  }
+
+  private eventsFromCache(selected: SourceId[]): Events | null {
+    const cache = this.readCache();
+    if (!cache) return null;
+    const bags = selected
+      .map((source) => ({ source, data: cache.sources[source] }))
+      .filter((item): item is { source: SourceId; data: Events } => Boolean(item.data?.features?.length));
+    if (bags.length === 0) return null;
+    const features = bags.flatMap((item) => (item.data.features ?? []).map((feature) => {
       const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? item.source };
       return { ...feature, properties };
     })).filter((feature) => this.passesClientFilters(feature.properties));
     return {
       type: 'FeatureCollection',
-      metadata: { generated: Date.now(), count: features.length, mode: 'fuentes' },
+      metadata: { generated: cache.savedAt, count: features.length, mode: 'cache' },
       features,
     };
+  }
+
+  private cacheSavedLabel(): string {
+    const savedAt = this.readCache()?.savedAt;
+    if (typeof savedAt !== 'number' || !Number.isFinite(savedAt)) return 'ND';
+    return new Date(savedAt).toISOString();
   }
 
   private passesClientFilters(properties: Properties | null | undefined): boolean {
@@ -496,6 +719,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     this.destroyed = true;
     clearTimeout(this.timer);
     clearTimeout(this.resumeRotateTimer);
+    cancelAnimationFrame(this.radiusRaf);
+    this.globe?.controls().removeEventListener('change', this.onControlsChange);
     this.resizeObserver?.disconnect();
     this.controller.abort();
     const globe = this.globe as (GlobeInstance & { _destructor?: () => void }) | undefined;
