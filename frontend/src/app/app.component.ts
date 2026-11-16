@@ -391,10 +391,10 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     const max = controls.maxDistance;
     const distance = controls.getDistance();
     const t = Math.min(1, Math.max(0, (distance - min) / Math.max(1, max - min)));
-    // Zoom máximo (cerca): ~22 % del radio base; zoom mínimo (lejos): 100 %.
+    // Zoom máximo (cerca): ~15 % del radio base; zoom mínimo (lejos): 100 %.
     // Suave (ease-out): se reduce poco a poco al acercar, sin un salto brusco.
     const eased = 1 - Math.pow(1 - t, 1.35);
-    this.radiusScale = 0.22 + eased * 0.78;
+    this.radiusScale = 0.15 + eased * 0.85;
     // Reaplicar accessors para que three-globe regenere la geometría.
     this.globe
       .pointRadius((d: object) => (d as QuakePoint).baseRadius * this.radiusScale)
@@ -568,7 +568,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       }
 
       const color = !depthOk ? '#94a3b8' : depth < 70 ? '#f5c542' : depth < 300 ? '#ff6b3d' : '#a78bfa';
-      const baseRadius = magnitude === null ? 0.55 : Math.max(0.45, Math.min(1.8, 0.45 + (magnitude + 1) * 0.16));
+      const baseRadius = magnitude === null ? 0.38 : Math.max(0.32, Math.min(1.35, 0.32 + (magnitude + 1) * 0.12));
       points.push({
         lat, lng: lon, baseRadius, color, place,
         mag: magLabel, depth: depthLabel, time, country, source: fuenteTxt, id,
