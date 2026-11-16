@@ -62,6 +62,47 @@ const NIGHT_SKY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sk
 const CACHE_KEY = 'observatorio-sismico-cache-v1';
 const CACHE_MAX_FEATURES = 800;
 
+type CountryLabel = { lat: number; lng: number; name: string };
+
+/** Centroide aproximado del anillo exterior (para etiquetas siempre visibles). */
+function ringCentroid(ring: number[][]): { lat: number; lng: number; area: number } | null {
+  if (!ring || ring.length < 3) return null;
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [x0, y0] = ring[j];
+    const [x1, y1] = ring[i];
+    if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
+    const cross = x0 * y1 - x1 * y0;
+    area += cross;
+    cx += (x0 + x1) * cross;
+    cy += (y0 + y1) * cross;
+  }
+  if (Math.abs(area) < 1e-12) {
+    const lon = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+    const lat = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+    return Number.isFinite(lon) && Number.isFinite(lat) ? { lat, lng: lon, area: 0 } : null;
+  }
+  area *= 0.5;
+  return { lng: cx / (6 * area), lat: cy / (6 * area), area: Math.abs(area) };
+}
+
+function featureLabelPoint(geometry: Geometry): { lat: number; lng: number } | null {
+  const rings: number[][][] = [];
+  if (geometry.type === 'Polygon') rings.push(geometry.coordinates[0]);
+  else if (geometry.type === 'MultiPolygon') {
+    for (const poly of geometry.coordinates) rings.push(poly[0]);
+  } else return null;
+  let best: { lat: number; lng: number; area: number } | null = null;
+  for (const ring of rings) {
+    const c = ringCentroid(ring);
+    if (!c) continue;
+    if (!best || c.area > best.area) best = c;
+  }
+  return best ? { lat: best.lat, lng: best.lng } : null;
+}
+
 type SourceCache = {
   version: 1;
   savedAt: number;
@@ -145,7 +186,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Contornos Natural Earth 1:110m (más ligeros que 10m para WebGL). */
+  /** Contornos Natural Earth 1:110m + nombres siempre visibles (sin hover). */
   private async loadCountryBorders(): Promise<void> {
     if (!this.globe) return;
     try {
@@ -156,6 +197,14 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         (feature): feature is Feature<Geometry, { NAME_ES?: string; ADMIN?: string }> =>
           Boolean(feature?.geometry) && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')
       );
+      const labels: CountryLabel[] = [];
+      for (const feature of features) {
+        const name = feature.properties?.NAME_ES ?? feature.properties?.ADMIN;
+        if (!name) continue;
+        const point = featureLabelPoint(feature.geometry);
+        if (!point) continue;
+        labels.push({ ...point, name });
+      }
       this.globe
         .polygonsData(features)
         .polygonGeoJsonGeometry('geometry')
@@ -165,10 +214,16 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         .polygonAltitude(0.004)
         .polygonCapCurvatureResolution(4)
         .polygonsTransitionDuration(0)
-        .polygonLabel((d: object) => {
-          const props = (d as Feature<Geometry, { NAME_ES?: string; ADMIN?: string }>).properties;
-          return props?.NAME_ES ?? props?.ADMIN ?? 'Sin nombre';
-        });
+        .labelsData(labels)
+        .labelLat('lat')
+        .labelLng('lng')
+        .labelText('name')
+        .labelColor(() => 'rgba(226, 236, 248, 0.92)')
+        .labelSize(0.35)
+        .labelDotRadius(0)
+        .labelAltitude(0.012)
+        .labelResolution(2)
+        .labelsTransitionDuration(0);
     } catch {
       this.countriesStatus.set('No se pudieron cargar las fronteras del globo');
     }

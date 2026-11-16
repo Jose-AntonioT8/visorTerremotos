@@ -1,1 +1,28 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Observatorio sísmico</title><base href="/"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><app-root></app-root></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Observatorio sísmico</title>
+  <base href="/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Quita el badge «Powered by Netlify» inyectado en el edge (también desactívalo en Project configuration → General). -->
+  <script>
+    (function () {
+      try {
+        localStorage.setItem('nl-hud:public:v1', 'hidden');
+        localStorage.setItem('nl-hud:owner-private:v1', 'hidden');
+      } catch (e) { /* modo privado */ }
+      function strip() {
+        document.getElementById('nl-badge-frame')?.remove();
+        document.getElementById('nl-hud-frame')?.remove();
+      }
+      strip();
+      new MutationObserver(strip).observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  </script>
+</head>
+<body>
+  <app-root></app-root>
+</body>
+</html>
+
