@@ -59,6 +59,8 @@ const SOURCE_LABEL: Record<SourceId, string> = { ign: 'IGN', usgs: 'USGS', emsc:
 const EARTH_NIGHT = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg';
 const EARTH_TOPO = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png';
 const NIGHT_SKY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png';
+/** Helvetiker no tiene ñ/tildes; optimer sí (Latin Extended). */
+const LABEL_TYPEFACE = 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/optimer_regular.typeface.json';
 const CACHE_KEY = 'observatorio-sismico-cache-v1';
 const CACHE_MAX_FEATURES = 800;
 
@@ -154,7 +156,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   private destroyed = false;
   private activeConfig?: Config;
   private resizeObserver?: ResizeObserver;
-  /** 1 = alejados; baja al hacer zoom (puntos más pequeños y fáciles de seleccionar). */
+  /** 1 = alejados; al acercar baja hasta un piso alto para seguir pudiendo clicar. */
   private radiusScale = 1;
   private radiusRaf = 0;
   private readonly onControlsChange = (): void => this.scheduleRadiusScale();
@@ -190,9 +192,10 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   private async loadCountryBorders(): Promise<void> {
     if (!this.globe) return;
     try {
-      const collection = await this.readJson<FeatureCollection<Geometry, { NAME_ES?: string; ADMIN?: string }>>(
-        'datos/paises.geojson'
-      );
+      const [collection, typeface] = await Promise.all([
+        this.readJson<FeatureCollection<Geometry, { NAME_ES?: string; ADMIN?: string }>>('datos/paises.geojson'),
+        this.readJson<object>(LABEL_TYPEFACE),
+      ]);
       const features = (collection.features ?? []).filter(
         (feature): feature is Feature<Geometry, { NAME_ES?: string; ADMIN?: string }> =>
           Boolean(feature?.geometry) && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')
@@ -218,11 +221,12 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         .labelLat('lat')
         .labelLng('lng')
         .labelText('name')
+        .labelTypeFace(typeface)
         .labelColor(() => 'rgba(226, 236, 248, 0.92)')
         .labelSize(0.35)
         .labelDotRadius(0)
         .labelAltitude(0.012)
-        .labelResolution(2)
+        .labelResolution(3)
         .labelsTransitionDuration(0);
     } catch {
       this.countriesStatus.set('No se pudieron cargar las fronteras del globo');
@@ -241,8 +245,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       .pointsData([])
       .pointLat('lat')
       .pointLng('lng')
-      // Altitud casi nula: discos planos sobre la superficie (no cilindros).
-      .pointAltitude(0.001)
+      // Por encima de fronteras (0.004) y etiquetas (0.012) para que el clic no lo robe el polígono.
+      .pointAltitude(0.015)
       .pointRadius((d: object) => (d as QuakePoint).baseRadius * this.radiusScale)
       .pointColor('color')
       .pointLabel('label')
@@ -292,7 +296,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     });
   }
 
-  /** Acercar cámara → puntos más pequeños; alejar → más grandes. */
+  /** Acercar cámara → ligeramente más pequeños; alejar → tamaño completo. Piso alto para clicar. */
   private applyRadiusScale(): void {
     if (!this.globe || this.destroyed) return;
     const controls = this.globe.controls();
@@ -300,8 +304,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     const max = controls.maxDistance;
     const distance = controls.getDistance();
     const t = Math.min(1, Math.max(0, (distance - min) / Math.max(1, max - min)));
-    // Zoom máximo (cerca): ~12 % del radio base; zoom mínimo (lejos): 100 %.
-    this.radiusScale = 0.12 + t * 0.88;
+    // Zoom máximo (cerca): 60 % del radio base; zoom mínimo (lejos): 100 %.
+    this.radiusScale = 0.6 + t * 0.4;
     // Reaplicar accessors para que three-globe regenere la geometría.
     this.globe
       .pointRadius((d: object) => (d as QuakePoint).baseRadius * this.radiusScale)
@@ -474,7 +478,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       }
 
       const color = !depthOk ? '#94a3b8' : depth < 70 ? '#f5c542' : depth < 300 ? '#ff6b3d' : '#a78bfa';
-      const baseRadius = magnitude === null ? 0.28 : Math.max(0.22, Math.min(1.35, 0.22 + (magnitude + 1) * 0.14));
+      const baseRadius = magnitude === null ? 0.55 : Math.max(0.45, Math.min(1.8, 0.45 + (magnitude + 1) * 0.16));
       points.push({
         lat, lng: lon, baseRadius, color, place,
         mag: magLabel, depth: depthLabel, time, country, source: fuenteTxt, id,

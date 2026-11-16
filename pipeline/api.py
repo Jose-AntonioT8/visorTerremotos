@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from fuentes import URLS as FUENTES_URLS
 from fuentes import leer_fuente
+from paises import asignar_pais, cargar_catalogo
 
 POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
@@ -24,6 +25,7 @@ POSTGRES_DB = os.environ["POSTGRES_DB"]
 POSTGRES_USER = os.environ["POSTGRES_USER"]
 POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 MAX_PUNTOS = int(os.environ.get("MAX_PUNTOS", "5000"))
+PAISES_GEOJSON = os.environ.get("PAISES_GEOJSON", "/datos/paises.geojson")
 ORIGENES = [
     origen.strip()
     for origen in os.environ.get("CORS_ORIGINS", "http://localhost:4200").split(",")
@@ -42,8 +44,32 @@ async def vida(app: FastAPI):
         min_size=1,
         max_size=4,
     )
+    app.state.paises = await asyncio.to_thread(cargar_catalogo, PAISES_GEOJSON)
+    app.state.nombres_pais = {
+        pais["country_id"]: pais["name_es"] for pais in app.state.paises
+    }
     yield
     await app.state.pool.close()
+
+
+def enriquecer_pais(coleccion, paises, nombres):
+    """Asigna country_id / country_name por punto en polígono (mismo catálogo que el consumidor)."""
+    for feature in coleccion.get("features") or []:
+        props = feature.setdefault("properties", {})
+        coords = (feature.get("geometry") or {}).get("coordinates") or []
+        if len(coords) < 2:
+            props["country_id"] = None
+            props["country_name"] = None
+            continue
+        lon, lat = coords[0], coords[1]
+        if not isinstance(lon, (int, float)) or not isinstance(lat, (int, float)):
+            props["country_id"] = None
+            props["country_name"] = None
+            continue
+        country_id = asignar_pais(paises, lon, lat)
+        props["country_id"] = country_id
+        props["country_name"] = nombres.get(country_id) if country_id else None
+    return coleccion
 
 
 app = FastAPI(lifespan=vida, docs_url=None, redoc_url=None, openapi_url=None)
@@ -160,7 +186,10 @@ async def eventos_fuente(fuente: str):
     if clave not in FUENTES_URLS:
         return JSONResponse(status_code=404, content={"error": "Fuente no reconocida", "fuentes": list(FUENTES_URLS)})
     try:
-        return await asyncio.to_thread(leer_fuente, clave)
+        coleccion = await asyncio.to_thread(leer_fuente, clave)
+        return await asyncio.to_thread(
+            enriquecer_pais, coleccion, app.state.paises, app.state.nombres_pais
+        )
     except Exception as exc:
         return JSONResponse(
             status_code=502,

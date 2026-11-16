@@ -80,6 +80,9 @@ services:
     env_file: .env
     environment:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,https://visorterremotos.netlify.app}
+      PAISES_GEOJSON: /datos/paises.geojson
+    volumes:
+      - ./frontend/public/datos/paises.geojson:/datos/paises.geojson:ro
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
