@@ -59,12 +59,51 @@ const SOURCE_LABEL: Record<SourceId, string> = { ign: 'IGN', usgs: 'USGS', emsc:
 const EARTH_NIGHT = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg';
 const EARTH_TOPO = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png';
 const NIGHT_SKY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png';
-/** Helvetiker no tiene ñ/tildes; optimer sí (Latin Extended). */
-const LABEL_TYPEFACE = 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/optimer_regular.typeface.json';
 const CACHE_KEY = 'observatorio-sismico-cache-v1';
 const CACHE_MAX_FEATURES = 800;
 
 type CountryLabel = { lat: number; lng: number; name: string };
+type CountryProps = { NAME_ES?: string; ADMIN?: string; ADM0_A3?: string };
+/** Catálogo para asignar país por punto en polígono (incluye margen de costa). */
+type CountryShape = { country_id: string; name: string; area: number; polygons: number[][][][] };
+
+/** Ray casting: ¿(lon, lat) dentro del anillo? */
+function ringContains(lon: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i]?.[0];
+    const yi = ring[i]?.[1];
+    const xj = ring[j]?.[0];
+    const yj = ring[j]?.[1];
+    if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
+    const intersect = ((yi! > lat) !== (yj! > lat)) && (lon < ((xj! - xi!) * (lat - yi!)) / (yj! - yi!) + xi!);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonContains(lon: number, lat: number, rings: number[][][]): boolean {
+  if (!rings.length || !ringContains(lon, lat, rings[0])) return false;
+  for (let h = 1; h < rings.length; h++) {
+    if (ringContains(lon, lat, rings[h])) return false;
+  }
+  return true;
+}
+
+function geometryPolygons(geometry: Geometry): number[][][][] {
+  if (geometry.type === 'Polygon') return [geometry.coordinates];
+  if (geometry.type === 'MultiPolygon') return geometry.coordinates;
+  return [];
+}
+
+function geometryArea(geometry: Geometry): number {
+  let total = 0;
+  for (const poly of geometryPolygons(geometry)) {
+    const c = ringCentroid(poly[0] ?? []);
+    if (c) total += c.area;
+  }
+  return total;
+}
 
 /** Centroide aproximado del anillo exterior (para etiquetas siempre visibles). */
 function ringCentroid(ring: number[][]): { lat: number; lng: number; area: number } | null {
@@ -156,14 +195,16 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   private destroyed = false;
   private activeConfig?: Config;
   private resizeObserver?: ResizeObserver;
-  /** 1 = alejados; al acercar baja hasta un piso alto para seguir pudiendo clicar. */
+  /** 1 = alejados; al acercar baja para que los puntos cercanos no se solapen. */
   private radiusScale = 1;
   private radiusRaf = 0;
   private readonly onControlsChange = (): void => this.scheduleRadiusScale();
+  /** Países con margen de costa 25 km; mismo criterio que el consumidor/API. */
+  private countryShapes: CountryShape[] = [];
 
   async ngAfterViewInit(): Promise<void> {
     this.initGlobe();
-    await this.loadCountryBorders();
+    await Promise.all([this.loadCountryBorders(), this.loadCountryCatalog()]);
     try {
       const config = await this.readJson<Config>('config.json');
       if (!['demo', 'api'].includes(config.mode)) throw new Error('Modo inválido');
@@ -192,17 +233,15 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   private async loadCountryBorders(): Promise<void> {
     if (!this.globe) return;
     try {
-      const [collection, typeface] = await Promise.all([
-        this.readJson<FeatureCollection<Geometry, { NAME_ES?: string; ADMIN?: string }>>('datos/paises.geojson'),
-        this.readJson<object>(LABEL_TYPEFACE),
-      ]);
+      const collection = await this.readJson<FeatureCollection<Geometry, CountryProps>>('datos/paises.geojson');
       const features = (collection.features ?? []).filter(
-        (feature): feature is Feature<Geometry, { NAME_ES?: string; ADMIN?: string }> =>
+        (feature): feature is Feature<Geometry, CountryProps> =>
           Boolean(feature?.geometry) && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')
       );
       const labels: CountryLabel[] = [];
       for (const feature of features) {
-        const name = feature.properties?.NAME_ES ?? feature.properties?.ADMIN;
+        // Inglés (ADMIN): la fuente por defecto del globo no pinta bien ñ/tildes de NAME_ES.
+        const name = feature.properties?.ADMIN ?? feature.properties?.NAME_ES;
         if (!name) continue;
         const point = featureLabelPoint(feature.geometry);
         if (!point) continue;
@@ -221,7 +260,6 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         .labelLat('lat')
         .labelLng('lng')
         .labelText('name')
-        .labelTypeFace(typeface)
         .labelColor(() => 'rgba(226, 236, 248, 0.92)')
         .labelSize(0.35)
         .labelDotRadius(0)
@@ -231,6 +269,55 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     } catch {
       this.countriesStatus.set('No se pudieron cargar las fronteras del globo');
     }
+  }
+
+  /** Catálogo con margen costero para mapear sismos sin país (IGN/USGS/EMSC). */
+  private async loadCountryCatalog(): Promise<void> {
+    try {
+      const collection = await this.readJson<FeatureCollection<Geometry, CountryProps>>('datos/paises-costa.geojson');
+      const shapes: CountryShape[] = [];
+      for (const feature of collection.features ?? []) {
+        const id = feature.properties?.ADM0_A3;
+        const name = feature.properties?.ADMIN ?? feature.properties?.NAME_ES;
+        if (!id || !name || !feature.geometry) continue;
+        const polygons = geometryPolygons(feature.geometry);
+        if (!polygons.length) continue;
+        shapes.push({ country_id: id, name, area: geometryArea(feature.geometry), polygons });
+      }
+      // Si hay solape, gana el de menor área (igual que pipeline/paises.py).
+      shapes.sort((a, b) => a.area - b.area || a.country_id.localeCompare(b.country_id));
+      this.countryShapes = shapes;
+    } catch {
+      this.countryShapes = [];
+    }
+  }
+
+  /** Si la fuente no trae país y el punto cae dentro de una frontera, lo asigna. */
+  private assignCountryIfMissing(properties: Properties, lon: number, lat: number): Properties {
+    if (properties.country_id) return properties;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+      return { ...properties, country_id: null, country_name: properties.country_name ?? null };
+    }
+    for (const shape of this.countryShapes) {
+      for (const poly of shape.polygons) {
+        if (polygonContains(lon, lat, poly)) {
+          return { ...properties, country_id: shape.country_id, country_name: shape.name };
+        }
+      }
+    }
+    return { ...properties, country_id: null, country_name: properties.country_name ?? null };
+  }
+
+  private withAssignedCountry(feature: Feature<Point, Properties>): Feature<Point, Properties> {
+    const coords = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : [];
+    const lon = coords[0];
+    const lat = coords[1];
+    const properties = this.assignCountryIfMissing(
+      { ...(feature.properties ?? { mag: null, place: 'Sin descripción', time: 0, updated: 0 }) },
+      lon,
+      lat
+    );
+    return { ...feature, properties };
   }
 
   private initGlobe(): void {
@@ -296,7 +383,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     });
   }
 
-  /** Acercar cámara → ligeramente más pequeños; alejar → tamaño completo. Piso alto para clicar. */
+  /** Acercar cámara → puntos más pequeños (menos solape); alejar → tamaño completo. */
   private applyRadiusScale(): void {
     if (!this.globe || this.destroyed) return;
     const controls = this.globe.controls();
@@ -304,8 +391,10 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     const max = controls.maxDistance;
     const distance = controls.getDistance();
     const t = Math.min(1, Math.max(0, (distance - min) / Math.max(1, max - min)));
-    // Zoom máximo (cerca): 60 % del radio base; zoom mínimo (lejos): 100 %.
-    this.radiusScale = 0.6 + t * 0.4;
+    // Zoom máximo (cerca): ~22 % del radio base; zoom mínimo (lejos): 100 %.
+    // Suave (ease-out): se reduce poco a poco al acercar, sin un salto brusco.
+    const eased = 1 - Math.pow(1 - t, 1.35);
+    this.radiusScale = 0.22 + eased * 0.78;
     // Reaplicar accessors para que three-globe regenere la geometría.
     this.globe
       .pointRadius((d: object) => (d as QuakePoint).baseRadius * this.radiusScale)
@@ -453,7 +542,8 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     const rows: TableRow[] = [];
     let omitted = 0;
 
-    for (const feature of data.features) {
+    for (const raw of data.features) {
+      const feature = this.withAssignedCountry(raw as Feature<Point, Properties>);
       const p = feature.properties;
       const c = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : [];
       const [lon, lat, depth] = c;
@@ -555,7 +645,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
     const features = bags.flatMap((item) => (item.data.features ?? []).map((feature) => {
       const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? item.source };
-      return { ...feature, properties };
+      return this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>);
     })).filter((feature) => this.passesClientFilters(feature.properties));
 
     return {
@@ -645,7 +735,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     if (bags.length === 0) return null;
     const features = bags.flatMap((item) => (item.data.features ?? []).map((feature) => {
       const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? item.source };
-      return { ...feature, properties };
+      return this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>);
     })).filter((feature) => this.passesClientFilters(feature.properties));
     return {
       type: 'FeatureCollection',

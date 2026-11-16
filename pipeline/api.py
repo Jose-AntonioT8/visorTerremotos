@@ -46,16 +46,20 @@ async def vida(app: FastAPI):
     )
     app.state.paises = await asyncio.to_thread(cargar_catalogo, PAISES_GEOJSON)
     app.state.nombres_pais = {
-        pais["country_id"]: pais["name_es"] for pais in app.state.paises
+        pais["country_id"]: pais["admin_name"] or pais["name_es"] for pais in app.state.paises
     }
     yield
     await app.state.pool.close()
 
 
 def enriquecer_pais(coleccion, paises, nombres):
-    """Asigna country_id / country_name por punto en polígono (mismo catálogo que el consumidor)."""
+    """Asigna country_id / country_name si la fuente no los trae y el punto cae en un país."""
     for feature in coleccion.get("features") or []:
         props = feature.setdefault("properties", {})
+        if props.get("country_id"):
+            if not props.get("country_name"):
+                props["country_name"] = nombres.get(props["country_id"])
+            continue
         coords = (feature.get("geometry") or {}).get("coordinates") or []
         if len(coords) < 2:
             props["country_id"] = None
@@ -156,7 +160,13 @@ def origen_eventos(mode):
 async def paises():
     async with app.state.pool.acquire() as conn:
         filas = await conn.fetch(
-            "SELECT country_id, name_es, continent, subregion FROM pais ORDER BY name_es"
+            """
+            SELECT country_id,
+                   COALESCE(admin_name, name_es) AS name_es,
+                   continent, subregion
+            FROM pais
+            ORDER BY COALESCE(admin_name, name_es)
+            """
         )
     return [
         {
@@ -220,7 +230,8 @@ async def eventos(
         filas = await conn.fetch(
             f"""
             SELECT e.event_id, e.mag, e.mag_type, e.place, e.depth_km, e.lon, e.lat,
-                   e.time_ms, e.updated_ms, e.country_id, p.name_es
+                   e.time_ms, e.updated_ms, e.country_id,
+                   COALESCE(p.admin_name, p.name_es) AS name_es
             FROM {origen} e
             LEFT JOIN pais p ON p.country_id = e.country_id
             WHERE {where}
@@ -335,7 +346,7 @@ async def estadisticas(
         ventanas = await conn.fetch(
             f"""
             SELECT date_trunc('hour', e.occurred_at AT TIME ZONE 'UTC') AS hora,
-                   e.country_id, p.name_es, count(*) AS total
+                   e.country_id, COALESCE(p.admin_name, p.name_es) AS name_es, count(*) AS total
             FROM {origen} e
             LEFT JOIN pais p ON p.country_id = e.country_id
             WHERE {where}
@@ -346,7 +357,7 @@ async def estadisticas(
         )
         paises_filas = await conn.fetch(
             f"""
-            SELECT e.country_id, p.name_es, count(*) AS total
+            SELECT e.country_id, COALESCE(p.admin_name, p.name_es) AS name_es, count(*) AS total
             FROM {origen} e
             LEFT JOIN pais p ON p.country_id = e.country_id
             WHERE {where}
