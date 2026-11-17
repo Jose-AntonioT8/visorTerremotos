@@ -66,14 +66,27 @@ Prueba §11: evento nuevo visible en API (luego en mapa en la toma 9).
 
 Pantalla: `informeCalidad.md`, de arriba abajo. (Si prefieres el resumen compacto: apartado Calidad de `docs/memoria.md`.)
 
-Para en al menos **cuatro** sitios (aprobado claro / notable):
+Arranca diciendo la fecha del documento, por ejemplo:  
+«Estas consultas son del 15 de noviembre de 2026, a las 18:09 UTC, sobre la base observatorio.»
 
-1. **Completitud — magnitudes nulas.** Denominador, resultado y decisión: se guardan nulas; no entran en la media; el mapa pone ND.
-2. **Unicidad — duplicados/revisiones.** `evento_actual`: filas = ids; las de más están en `evento_version`.
-3. **Completitud / exactitud — país ausente.** Porcentaje con denominador; no se copia el país desde `place`; «Sin país asignado».
-4. **Validez — cuarentena.** Motivo + original; coordenada inválida y tipos no earthquake fuera de `evento_actual`.
+Luego para en **cuatro** sitios (con eso ya cubres aprobado claro / notable). Habla así, señalando cada apartado:
 
-Menciona en una frase **actualidad** (última ingesta vs `generated`) y **consistencia** de revisiones (vivo vs replay), aunque sea leyendo la tabla de la memoria. Di la fecha de las consultas del documento que enseñes.
+1. **Magnitudes nulas (completitud)** — apartado «Magnitudes nulas»  
+   «Aquí el denominador son 18301 eventos de 2025 con magnitud pedida 4 o más. En ese corte no hay magnitudes nulas, porque USGS ya filtraba por 4. La decisión importa igual: si llega un nulo, lo guardamos nulo, no lo convertimos en cero. Esos nulos no entran en la media, y en el mapa se ven como ND. En la base hay un caso de prueba, prueba-mar, con magnitud nula a propósito.»
+
+2. **Duplicados y revisiones (unicidad)** — apartado «Duplicados y revisiones»  
+   «En evento_actual hay tantas filas como identificadores distintos: una fila vigente por terremoto. Las revisiones no se cuentan como terremotos nuevos: van a evento_version. En el informe, esas filas de más son revisiones de unos pocos eventos, no duplicados erróneos. Reenviar la misma versión no crea otro terremoto.»
+
+3. **País ausente (completitud / exactitud)** — apartado «País ausente»  
+   «Con el mismo denominador de 18301, una parte no tiene país: el porcentaje sale dividiendo sin_pais entre ese total. Si el punto no cae en el polígono ni en el margen de costa, country_id se queda nulo y el panel pone “Sin país asignado”. No inventamos el país leyendo el texto place ni asignando el más cercano.»
+
+4. **Cuarentena (validez)** — apartado «Anomalías»  
+   «Lo que no se puede usar no entra en evento_actual: va a la tabla cuarentena, con el motivo y el mensaje original. Ahí está, por ejemplo, una coordenada imposible —latitud 145— y varios mensajes que no son type earthquake. Así no pintamos un punto falso ni metemos explosiones en el análisis.»
+
+Cierra con **una frase** de actualidad y **una** de consistencia (puedes leerlas de la tabla de Calidad en `docs/memoria.md` si te resulta más fácil):
+
+- Actualidad: «La última ingesta correcta, last_ingestion, no es la misma cifra que generated del panel: una es cuándo pedimos a USGS, la otra cuándo se generó la respuesta.»
+- Consistencia: «En vivo y en replay el mismo evento puede quedar en magnitudes distintas: los esquemas no se pisan; la revisión controlada solo cambió el replay.»
 
 Criterio: **calidad**.
 
@@ -103,11 +116,16 @@ Criterio: **modelado** (integración geográfica, grano). Prueba §11: evento ma
 
 Pantalla: terminal + apartado «Duplicados y revisiones» de `informeCalidad.md` (o `docs/prueba-reproduccion.md`).
 
+**Para qué es el comando:** entrar a PostgreSQL del Compose y sacar **tres números de un golpe**: cuántas filas hay en `evento_actual` (`actuales`), cuántos `event_id` distintos hay ahí (`ids`), y cuántas filas hay en `evento_version` (`versiones`). Sirve para demostrar en vivo que el modelo no duplica terremotos: una fila vigente por evento; el historial de cambios va aparte.
+
 ```text
 docker compose exec postgres psql -U observatorio -d observatorio -c "SELECT (SELECT count(*) FROM evento_actual) AS actuales, (SELECT count(DISTINCT event_id) FROM evento_actual) AS ids, (SELECT count(*) FROM evento_version) AS versiones;"
 ```
 
-`actuales` e `ids` iguales. `versiones` mayor o igual. Señala un caso: repetir el mismo `updated` no sumó terremotos; la revisión posterior cambió los datos actuales; una versión antigua no sustituye a la más reciente.
+Qué mirar en el resultado: `actuales` e `ids` **iguales** (no hay dos filas vigentes del mismo terremoto). `versiones` **mayor o igual** (si es mayor, la diferencia son revisiones, no eventos nuevos).
+
+Qué decir, por ejemplo:  
+«Cuento las filas vigentes y los identificadores distintos: salen iguales, así que hay una sola fila actual por evento. En versiones hay más filas: esas de más son revisiones. En el informe (o en la prueba de reproducción) se ve que reenviar el mismo updated no suma terremotos; una revisión posterior actualiza la fila vigente; una versión antigua no pisa a la más reciente.»
 
 Criterio: **modelado** (revisiones, idempotencia).  
 Pruebas §11: misma versión reenviada; versión posterior; versión antigua que no pisa la nueva.
