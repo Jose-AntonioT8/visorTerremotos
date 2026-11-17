@@ -1,5 +1,6 @@
-"""Productor. Publica novedades y revisiones, y consulta el feed real en MODE=live.
+"""Productor. Publica novedades y revisiones, y consulta feeds reales en MODE=live.
 
+Consulta USGS, IGN y EMSC; el consumidor guarda todo en PostgreSQL con `source`.
 No borra un evento porque desaparezca del feed: pudo salir de la ventana de 24 horas.
 La reconciliación de bajas y fusiones de USGS queda fuera del alcance mínimo;
 está descrita en docs/limitaciones.md.
@@ -16,11 +17,14 @@ import asyncpg
 from aiokafka import AIOKafkaProducer
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 
+from fuentes import URLS as FUENTES_URLS
+from fuentes import leer_fuente
+
 BOOTSTRAP = os.environ["KAFKA_BOOTSTRAP"]
 TOPIC = os.environ["KAFKA_TOPIC"]
 MODE = os.environ.get("MODE", "live")
 INTERVAL_SECONDS = int(os.environ.get("INTERVAL_SECONDS", "60"))
-FEED_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
+FEED_URL = FUENTES_URLS["usgs"]
 POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
 POSTGRES_DB = os.environ["POSTGRES_DB"]
@@ -130,9 +134,22 @@ async def marcar_publicada(conn, evento):
     )
 
 
-async def enviar(productor, evento, mode):
+def con_id_fuente(evento, source):
+    """Prefija IGN/EMSC para no chocar con USGS en event_id / publicacion."""
+    if source == "usgs":
+        return evento
+    crudo = str(evento.get("id") or "sin-id")
+    if crudo.startswith(f"{source}:"):
+        return evento
+    copia = dict(evento)
+    copia["id"] = f"{source}:{crudo}"
+    return copia
+
+
+async def enviar(productor, evento, mode, source=None):
+    origen = source or ("usgs" if mode == "live" else "secuencia-prueba")
     mensaje = {
-        "source": "usgs" if mode == "live" else "secuencia-prueba",
+        "source": origen,
         "ingested_at": datetime.now(timezone.utc).isoformat(),
         "mode": mode,
         "event": evento,
@@ -140,11 +157,11 @@ async def enviar(productor, evento, mode):
     meta = await productor.send_and_wait(
         TOPIC,
         json.dumps(mensaje).encode("utf-8"),
-        key=evento["id"].encode("utf-8"),
+        key=str(evento["id"]).encode("utf-8"),
     )
     print(
         f"Acuse de Kafka: id={evento['id']} updated={evento['properties']['updated']} "
-        f"offset={meta.offset} mode={mode}",
+        f"offset={meta.offset} mode={mode} source={origen}",
         flush=True,
     )
 
@@ -169,16 +186,24 @@ async def excluir(conn, evento):
     print(f"Excluido {evento.get('id')}: {motivo}", flush=True)
 
 
-async def publicar_si_procede(conn, productor, evento, mode):
+async def publicar_si_procede(conn, productor, evento, mode, source="usgs"):
     tipo = (evento.get("properties") or {}).get("type")
     if tipo != "earthquake":
         await excluir(conn, evento)
+        return
+    evento = con_id_fuente(evento, source)
+    props = evento.get("properties") or {}
+    if props.get("updated") is None:
+        props = {**props, "updated": props.get("time")}
+        evento = {**evento, "properties": props}
+    if props.get("updated") is None:
+        print(f"No publico {evento.get('id')}: sin updated/time", flush=True)
         return
     accion = await decision(conn, evento)
     if accion != "publicar":
         print(f"No publico {evento['id']} updated={evento['properties']['updated']}: {accion}", flush=True)
         return
-    await enviar(productor, evento, mode)
+    await enviar(productor, evento, mode, source)
     await marcar_publicada(conn, evento)
 
 
@@ -202,23 +227,52 @@ async def descargar_feed():
     return None
 
 
+async def registrar_consulta(conn, url, record_count, resultado):
+    await conn.execute(
+        """
+        INSERT INTO consulta_fuente (consulted_at, url, record_count, resultado)
+        VALUES ($1, $2, $3, $4)
+        """,
+        datetime.now(timezone.utc),
+        url,
+        record_count,
+        resultado,
+    )
+
+
+async def publicar_usgs(conn, productor):
+    datos = await descargar_feed()
+    if datos is None:
+        await registrar_consulta(conn, FEED_URL, 0, "error")
+        return
+    features = datos.get("features") or []
+    for feature in features:
+        await publicar_si_procede(conn, productor, feature, "live", "usgs")
+    await registrar_consulta(conn, FEED_URL, len(features), "ok")
+    print(f"Consulta USGS correcta: {len(features)} features", flush=True)
+
+
+async def publicar_fuente_normalizada(conn, productor, fuente):
+    url = FUENTES_URLS[fuente]
+    try:
+        coleccion = await asyncio.to_thread(leer_fuente, fuente)
+    except Exception as exc:
+        print(f"Error al consultar {fuente.upper()}: {exc}", flush=True)
+        await registrar_consulta(conn, url, 0, "error")
+        return
+    features = coleccion.get("features") or []
+    for feature in features:
+        await publicar_si_procede(conn, productor, feature, "live", fuente)
+    await registrar_consulta(conn, url, len(features), "ok")
+    print(f"Consulta {fuente.upper()} correcta: {len(features)} features", flush=True)
+
+
 async def bucle_vivo(conn, productor):
     while True:
-        datos = await descargar_feed()
-        if datos is not None:
-            features = datos.get("features") or []
-            for feature in features:
-                await publicar_si_procede(conn, productor, feature, "live")
-            await conn.execute(
-                """
-                INSERT INTO consulta_fuente (consulted_at, url, record_count, resultado)
-                VALUES ($1, $2, $3, 'ok')
-                """,
-                datetime.now(timezone.utc),
-                FEED_URL,
-                len(features),
-            )
-            print(f"Consulta USGS correcta: {len(features)} features. Siguiente en {INTERVAL_SECONDS}s", flush=True)
+        await publicar_usgs(conn, productor)
+        for fuente in ("ign", "emsc"):
+            await publicar_fuente_normalizada(conn, productor, fuente)
+        print(f"Ciclo de fuentes terminado. Siguiente en {INTERVAL_SECONDS}s", flush=True)
         await asyncio.sleep(INTERVAL_SECONDS)
 
 

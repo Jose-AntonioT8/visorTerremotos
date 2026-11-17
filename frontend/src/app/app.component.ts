@@ -11,6 +11,7 @@ type Events = FeatureCollection<Point, Properties> & {
   metadata?: {
     generated?: number; mode?: string; last_ingestion?: number | null; count?: number;
     truncated?: boolean; limit?: number; offset?: number; source?: string; url?: string;
+    fuentes?: string[]; fuentes_error?: { id: string; detalle: string }[];
   };
 };
 type Config = {
@@ -595,124 +596,72 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       : '');
   }
 
-  /**
-   * Globo y tabla desde `/api/eventos` (PostgreSQL: feed ingerido + histórico).
-   * IGN/EMSC siguen siendo lecturas en vivo opcionales vía `/api/fuentes/*`.
-   * USGS en el checkbox = catálogo del pipeline, no el feed público del día.
-   */
+  /** Una sola lectura: el panel solo habla con `/api/eventos` (IGN/EMSC van por la API). */
   private async loadPipelineEvents(base: string, headers: Record<string, string>): Promise<{ data: Events; usedCache: boolean }> {
     const selected = this.selectedSources();
     const reproducing = this.reproduction();
 
     if (!reproducing && selected.length === 0) {
-      this.sourceStatus.set('Ninguna fuente activa: marca USGS (pipeline) y/o IGN/EMSC en vivo');
+      this.sourceStatus.set('Ninguna fuente activa: marca USGS, IGN o EMSC');
       this.cacheNotice.set('');
       return {
-        data: { type: 'FeatureCollection', metadata: { generated: Date.now(), count: 0, mode: 'live' }, features: [] },
+        data: { type: 'FeatureCollection', metadata: { generated: Date.now(), count: 0, mode: 'live', fuentes: [] }, features: [] },
         usedCache: false,
       };
     }
 
-    const features: Feature<Point, Properties>[] = [];
-    const notes: string[] = [];
-    let usedCache = false;
-    let generated = Date.now();
-    let lastIngestion: number | null | undefined;
-    let resultCount = 0;
-    let truncated = false;
-    let mode = reproducing ? 'replay' : 'live';
-
-    const wantPipeline = reproducing || selected.includes('usgs');
-    if (wantPipeline) {
-      try {
-        const data = await this.readJson<Events>(`${base}/api/eventos${this.query(true)}`, headers);
-        if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('formato');
-        this.saveSourceToCache('usgs', data);
-        for (const feature of data.features) {
-          const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? 'usgs' };
-          features.push(this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>));
-        }
-        generated = data.metadata?.generated ?? generated;
-        lastIngestion = data.metadata?.last_ingestion;
-        resultCount = data.metadata?.count ?? data.features.length;
-        truncated = Boolean(data.metadata?.truncated);
-        mode = data.metadata?.mode ?? mode;
-        notes.push(reproducing ? 'Reproducción /api/eventos?mode=replay' : 'Pipeline /api/eventos (histórico + feed ingerido)');
-      } catch (error) {
-        const fromDisk = this.readCache()?.sources?.usgs;
-        if (fromDisk?.features?.length) {
-          usedCache = true;
-          for (const feature of fromDisk.features) {
+    try {
+      const data = await this.readJson<Events>(`${base}/api/eventos${this.query(true)}`, headers);
+      if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('formato');
+      this.saveSourceToCache('usgs', data);
+      const features = data.features.map((feature) => {
+        const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? 'usgs' };
+        return this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>);
+      });
+      const ok = (data.metadata?.fuentes ?? selected).map((id) => SOURCE_LABEL[id as SourceId] ?? id);
+      const failed = (data.metadata?.fuentes_error ?? []).map((item) => `${SOURCE_LABEL[item.id as SourceId] ?? item.id} (${item.detalle})`);
+      this.sourceStatus.set([
+        ok.length ? `/api/eventos: ${ok.join(', ')}` : '',
+        failed.length ? `Sin datos: ${failed.join(', ')}` : '',
+        reproducing ? 'modo replay' : '',
+      ].filter(Boolean).join(' · ') || '/api/eventos');
+      this.cacheNotice.set('');
+      return {
+        data: { ...data, features },
+        usedCache: false,
+      };
+    } catch (error) {
+      const fromDisk = this.readCache()?.sources?.usgs;
+      if (fromDisk?.features?.length) {
+        const features = fromDisk.features
+          .map((feature) => {
             const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? 'usgs' };
-            const next = this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>);
-            if (this.passesClientFilters(next.properties)) features.push(next);
-          }
-          generated = fromDisk.metadata?.generated ?? generated;
-          lastIngestion = fromDisk.metadata?.last_ingestion;
-          resultCount = features.length;
-          notes.push('Copia local de /api/eventos');
-        } else {
-          notes.push(`USGS pipeline (${error instanceof Error ? error.message : 'error'})`);
-        }
+            return this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>);
+          })
+          .filter((feature) => this.passesClientFilters(feature.properties))
+          .filter((feature) => {
+            if (reproducing) return true;
+            const source = String(feature.properties?.source ?? 'usgs');
+            return selected.includes(source as SourceId);
+          });
+        this.sourceStatus.set('Copia local de /api/eventos');
+        return {
+          data: {
+            type: 'FeatureCollection',
+            metadata: {
+              generated: fromDisk.metadata?.generated ?? Date.now(),
+              last_ingestion: fromDisk.metadata?.last_ingestion ?? null,
+              count: features.length,
+              mode: fromDisk.metadata?.mode ?? 'cache',
+              truncated: true,
+            },
+            features,
+          },
+          usedCache: true,
+        };
       }
+      throw error instanceof Error ? error : new Error('No se pudo leer /api/eventos');
     }
-
-    if (!reproducing) {
-      await Promise.all((['ign', 'emsc'] as const).filter((source) => selected.includes(source)).map(async (source) => {
-        try {
-          const data = await this.readJson<Events>(`${base}/api/fuentes/${source}`, headers);
-          if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('formato');
-          this.saveSourceToCache(source, data);
-          for (const feature of data.features) {
-            const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? source };
-            const next = this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>);
-            if (this.passesClientFilters(next.properties)) features.push(next);
-          }
-          notes.push(`En vivo ${SOURCE_LABEL[source]}`);
-        } catch (error) {
-          const fromDisk = this.readCache()?.sources?.[source];
-          if (fromDisk?.features?.length) {
-            usedCache = true;
-            for (const feature of fromDisk.features) {
-              const properties = { ...(feature.properties ?? {}), source: feature.properties?.source ?? source };
-              const next = this.withAssignedCountry({ ...feature, properties } as Feature<Point, Properties>);
-              if (this.passesClientFilters(next.properties)) features.push(next);
-            }
-            notes.push(`Copia local ${SOURCE_LABEL[source]}`);
-          } else {
-            notes.push(`${SOURCE_LABEL[source]} (${error instanceof Error ? error.message : 'error'})`);
-          }
-        }
-      }));
-    } else {
-      notes.push('IGN/EMSC no aplican en reproducción');
-    }
-
-    this.sourceStatus.set(notes.filter(Boolean).join(' · ') || 'Sin lecturas');
-    this.cacheNotice.set('');
-
-    if (features.length === 0 && !wantPipeline) {
-      throw new Error('Ninguna fuente respondió');
-    }
-    if (features.length === 0 && wantPipeline && !usedCache && notes.some((n) => n.includes('error') || n.includes('pipeline'))) {
-      throw new Error('No se pudo leer /api/eventos');
-    }
-
-    return {
-      data: {
-        type: 'FeatureCollection',
-        metadata: {
-          generated,
-          last_ingestion: lastIngestion ?? null,
-          count: resultCount || features.length,
-          truncated,
-          mode,
-          offset: this.offset(),
-        },
-        features,
-      },
-      usedCache,
-    };
   }
 
   private readCache(): SourceCache | null {
@@ -895,7 +844,13 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     if (this.filterMag() !== '') params.set('min_mag', this.filterMag());
     if (this.filterCountry()) params.set('country_id', this.filterCountry());
     if (this.filterRegion()) params.set('subregion', this.filterRegion());
-    if (this.reproduction()) params.set('mode', 'replay');
+    if (this.reproduction()) {
+      params.set('mode', 'replay');
+      params.set('fuentes', 'usgs');
+    } else {
+      const selected = this.selectedSources();
+      if (selected.length) params.set('fuentes', selected.join(','));
+    }
     if (withOffset && this.offset() > 0) params.set('offset', String(this.offset()));
     const text = params.toString();
     return text ? `?${text}` : '';

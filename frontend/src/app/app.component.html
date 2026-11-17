@@ -2,7 +2,7 @@
   <header>
     <p class="eyebrow">BIG DATA · PROYECTO DE AULA</p>
     <h1>Observatorio de actividad sísmica</h1>
-    <p>Globo 3D con el catálogo del pipeline (histórico y feed ingerido) y lecturas en vivo opcionales.</p>
+    <p>Globo 3D con USGS, IGN y EMSC ingeridos en PostgreSQL a través del pipeline.</p>
   </header>
   <section class="info" aria-live="polite">
     <strong>{{ mode() }}</strong>
@@ -21,9 +21,9 @@
   <form class="filters" (submit)="applyFilters($event)">
     <fieldset class="sources">
       <legend>Fuentes en el globo</legend>
-      <label class="source-option"><input type="checkbox" [checked]="sourceIgn()" (change)="toggleSource('ign', sourceChecked($event))"> IGN (vivo)</label>
-      <label class="source-option"><input type="checkbox" [checked]="sourceUsgs()" (change)="toggleSource('usgs', sourceChecked($event))"> USGS (pipeline)</label>
-      <label class="source-option"><input type="checkbox" [checked]="sourceEmsc()" (change)="toggleSource('emsc', sourceChecked($event))"> EMSC (vivo)</label>
+      <label class="source-option"><input type="checkbox" [checked]="sourceIgn()" (change)="toggleSource('ign', sourceChecked($event))"> IGN</label>
+      <label class="source-option"><input type="checkbox" [checked]="sourceUsgs()" (change)="toggleSource('usgs', sourceChecked($event))"> USGS</label>
+      <label class="source-option"><input type="checkbox" [checked]="sourceEmsc()" (change)="toggleSource('emsc', sourceChecked($event))"> EMSC</label>
     </fieldset>
     <label>Desde UTC <input type="datetime-local" [value]="filterStart()" (input)="filterStart.set(inputValue($event))"></label>
     <label>Hasta UTC, excluido <input type="datetime-local" [value]="filterEnd()" (input)="filterEnd.set(inputValue($event))"></label>
@@ -45,7 +45,7 @@
     <button type="button" (click)="clearFilters()">Limpiar</button>
     <button type="button" (click)="toggleReproduction()">{{ reproduction() ? 'Volver al directo' : 'Ver reproducción' }}</button>
   </form>
-  <p class="note">Las fechas se leen como UTC. USGS (pipeline) es `GET /api/eventos` sobre PostgreSQL: ahí está el histórico 2025 y el feed ingerido. IGN y EMSC son lecturas en vivo (`/api/fuentes/*`). Las estadísticas van por `/api/estadisticas`. En reproducción solo aplica el esquema replay.</p>
+  <p class="note">Las fechas se leen como UTC. El globo y las estadísticas leen solo PostgreSQL vía `/api/eventos` y `/api/estadisticas` (`?fuentes=`). USGS, IGN y EMSC los ingiere el productor a Kafka y el consumidor los guarda con su `source`. En reproducción solo aplica el esquema replay.</p>
 
   <section class="globe-panel">
     <div class="globe-toolbar">

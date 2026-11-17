@@ -1,7 +1,7 @@
 """API de consulta. Lee PostgreSQL para /api/eventos y no usa Kafka.
 
-Las rutas /api/fuentes/* son lecturas aditivas en vivo (IGN, USGS, EMSC)
-y no sustituyen el pipeline ni el contrato de /api/eventos.
+`/api/eventos` y `/api/estadisticas` leen USGS, IGN y EMSC ya ingeridos en
+PostgreSQL (`evento_actual.source`). `/api/fuentes/*` queda solo para depuración.
 """
 
 import asyncio
@@ -46,8 +46,9 @@ async def vida(app: FastAPI):
     )
     app.state.paises = await asyncio.to_thread(cargar_catalogo, PAISES_GEOJSON)
     app.state.nombres_pais = {
-        pais["country_id"]: pais["admin_name"] or pais["name_es"] for pais in app.state.paises
+        pais["country_id"]: pais.get("admin_name") or pais.get("name_es") for pais in app.state.paises
     }
+    app.state.subregion_pais = {pais["country_id"]: pais.get("subregion") for pais in app.state.paises}
     yield
     await app.state.pool.close()
 
@@ -126,7 +127,7 @@ def normalizar(momento):
     return momento
 
 
-def clausula(mode, start, end, min_mag, country_id, subregion):
+def clausula(mode, start, end, min_mag, country_id, subregion, fuentes=None):
     condiciones = ["e.mode = $1"]
     argumentos: list = [mode]
     if start is not None:
@@ -149,11 +150,28 @@ def clausula(mode, start, end, min_mag, country_id, subregion):
             "EXISTS (SELECT 1 FROM pais region "
             f"WHERE region.country_id = e.country_id AND region.subregion = ${len(argumentos)})"
         )
+    if fuentes:
+        argumentos.append(fuentes)
+        condiciones.append(f"e.source = ANY(${len(argumentos)}::text[])")
     return " AND ".join(condiciones), argumentos
 
 
 def origen_eventos(mode):
     return "replay.evento_actual" if mode == "replay" else "evento_actual"
+
+
+FUENTES_VALIDAS = ("usgs", "ign", "emsc")
+
+
+def parsear_fuentes(valor: str | None):
+    if valor is None or not str(valor).strip():
+        return ["usgs"]
+    pedidas = []
+    for trozo in str(valor).split(","):
+        clave = trozo.strip().lower()
+        if clave in FUENTES_VALIDAS and clave not in pedidas:
+            pedidas.append(clave)
+    return pedidas
 
 
 @app.get("/api/paises")
@@ -215,6 +233,7 @@ async def eventos(
     country_id: str | None = None,
     subregion: str | None = None,
     mode: str = "live",
+    fuentes: str | None = Query(default="usgs"),
     offset: int = Query(default=0, ge=0),
 ):
     ahora = datetime.now(timezone.utc)
@@ -223,14 +242,34 @@ async def eventos(
     if start is None and end is None and mode != "replay":
         start = ahora - timedelta(hours=24)
         end = ahora
-    where, argumentos = clausula(mode, start, end, min_mag, country_id, subregion)
+
+    pedidas = parsear_fuentes(fuentes)
+    if mode == "replay":
+        pedidas = ["usgs"]
+    if not pedidas:
+        return {
+            "type": "FeatureCollection",
+            "metadata": {
+                "generated": milis(ahora),
+                "last_ingestion": None,
+                "mode": mode,
+                "fuentes": [],
+                "count": 0,
+                "truncated": False,
+                "limit": MAX_PUNTOS,
+                "offset": offset,
+            },
+            "features": [],
+        }
+
+    where, argumentos = clausula(mode, start, end, min_mag, country_id, subregion, pedidas)
     origen = origen_eventos(mode)
     async with app.state.pool.acquire() as conn:
         total = await conn.fetchval(f"SELECT count(*) FROM {origen} e WHERE {where}", *argumentos)
         filas = await conn.fetch(
             f"""
             SELECT e.event_id, e.mag, e.mag_type, e.place, e.depth_km, e.lon, e.lat,
-                   e.time_ms, e.updated_ms, e.country_id,
+                   e.time_ms, e.updated_ms, e.country_id, e.source,
                    COALESCE(p.admin_name, p.name_es) AS name_es
             FROM {origen} e
             LEFT JOIN pais p ON p.country_id = e.country_id
@@ -243,6 +282,14 @@ async def eventos(
             offset,
         )
         ingesta = await ultima_ingesta(conn)
+        presentes = [
+            fila["source"]
+            for fila in await conn.fetch(
+                f"SELECT DISTINCT e.source FROM {origen} e WHERE {where}",
+                *argumentos,
+            )
+        ]
+
     features = []
     for fila in filas:
         features.append(
@@ -261,7 +308,7 @@ async def eventos(
                     "updated": fila["updated_ms"],
                     "country_id": fila["country_id"],
                     "country_name": fila["name_es"],
-                    "source": "usgs",
+                    "source": fila["source"],
                 },
             }
         )
@@ -271,8 +318,9 @@ async def eventos(
             "generated": milis(ahora),
             "last_ingestion": ingesta,
             "mode": mode,
+            "fuentes": [fuente for fuente in pedidas if fuente in presentes] or pedidas,
             "count": total,
-            "truncated": offset + len(features) < total,
+            "truncated": offset + len(features) < (total or 0),
             "limit": MAX_PUNTOS,
             "offset": offset,
         },
@@ -307,6 +355,7 @@ async def estadisticas(
     country_id: str | None = None,
     subregion: str | None = None,
     mode: str = "live",
+    fuentes: str | None = Query(default="usgs"),
 ):
     ahora = datetime.now(timezone.utc)
     start = normalizar(start)
@@ -314,10 +363,13 @@ async def estadisticas(
     if start is None and end is None and mode != "replay":
         start = ahora - timedelta(hours=24)
         end = ahora
-    where, argumentos = clausula(mode, start, end, min_mag, country_id, subregion)
+    pedidas = parsear_fuentes(fuentes)
+    if mode == "replay":
+        pedidas = ["usgs"]
+    where, argumentos = clausula(mode, start, end, min_mag, country_id, subregion, pedidas)
     origen = origen_eventos(mode)
     corte = 4.0 if min_mag is None or min_mag < 4 else min_mag
-    where_corte, args_corte = clausula(mode, None, None, corte, country_id, subregion)
+    where_corte, args_corte = clausula(mode, None, None, corte, country_id, subregion, pedidas)
     reciente_inicio = ahora - timedelta(hours=24)
     async with app.state.pool.acquire() as conn:
         resumen = await conn.fetchrow(
