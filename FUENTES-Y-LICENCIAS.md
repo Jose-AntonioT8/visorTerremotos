@@ -34,7 +34,7 @@ Lecturas en vivo del visor (filtro multi-fuente en la UI; propiedad `source`: `i
 |---|---|---|
 | USGS | https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson | GeoJSON |
 | EMSC | https://www.seismicportal.eu/fdsnws/event/1/query?limit=500&format=json | GeoJSON (FDSN) |
-| IGN (España) | https://www.ign.es/ign/RssTools/sismologia.xml | GeoRSS (últimos ~10 días, área ibérica/Canarias) |
+| IGN (España) | https://www.ign.es/web/resources/sismologia/tproximos/terremotos.js | GeoJSON embebido (`dias10`, portal últimos terremotos) |
 
 También: formato USGS https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php · histórico USGS https://earthquake.usgs.gov/fdsnws/event/1/ · portal IGN https://www.ign.es/web/ign/portal · EMSC https://www.emsc.eu/
 
